@@ -1,0 +1,5 @@
+module Clibpqxx [system] {
+  umbrella "/opt/homebrew/Cellar/libpqxx/7.9.2/include/pqxx"
+  link "pqxx"
+  export *
+}

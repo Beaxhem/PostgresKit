@@ -1,0 +1,6 @@
+module Clibpq [system] {
+//    umbrella header "/opt/homebrew/Cellar/libpq/16.4/include/libpq-fe.h"link "pq"
+  header "pq.h"
+  link "pq"
+  export *
+}

@@ -1,21 +1,38 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 5.10.0
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
 
 let package = Package(
-    name: "MyLibrary",
+    name: "PostgresAdapter",
+    platforms: [
+        .macOS(.v11)
+    ],
     products: [
-        // Products define the executables and libraries a package produces, making them visible to other packages.
-        .library(
-            name: "MyLibrary",
-            targets: ["MyLibrary"]),
+        .executable(name: "MyLibrary", targets: ["MyLibrary"]),
     ],
     targets: [
-        // Targets are the basic building blocks of a package, defining a module or a test suite.
-        // Targets can depend on other targets in this package and products from dependencies.
-        .target(
-            name: "MyLibrary"),
-
-    ]
+        .executableTarget(
+            name: "MyLibrary",
+            dependencies: ["Clibpqxx", "Clibpq"],
+            path: "Sources",
+            swiftSettings: [.interoperabilityMode(.Cxx)]
+        ),
+        .systemLibrary(
+            name: "Clibpq",
+            pkgConfig: "libpq",
+            providers: [
+                .brewItem(["libpq"]),
+                .aptItem(["libpq-dev"])
+            ]
+        ),
+        .systemLibrary(
+            name: "Clibpqxx",
+            pkgConfig: "libpqxx",
+            providers: [
+                .brewItem(["libpqxx"]),
+            ]
+        ),
+    ],
+    cxxLanguageStandard: .cxx20
 )
