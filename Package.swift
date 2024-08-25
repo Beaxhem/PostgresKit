@@ -4,20 +4,17 @@
 import PackageDescription
 
 let package = Package(
-    name: "PostgresAdapter",
+    name: "PostgresKit",
     platforms: [
         .macOS(.v11)
     ],
     products: [
-        .executable(name: "MyLibrary", targets: ["MyLibrary"]),
+        .library(name: "PostgresKit", targets: ["PostgresKit"]),
+    ],
+    dependencies: [
+        .package(name: "SqlAdapterKit", path: "../SqlAdapterKit")
     ],
     targets: [
-        .executableTarget(
-            name: "MyLibrary",
-            dependencies: ["Clibpqxx", "Clibpq"],
-            path: "Sources",
-            swiftSettings: [.interoperabilityMode(.Cxx)]
-        ),
         .systemLibrary(
             name: "Clibpq",
             pkgConfig: "libpq",
@@ -33,6 +30,21 @@ let package = Package(
                 .brewItem(["libpqxx"]),
             ]
         ),
+        .target(
+            name: "CPostgres",
+            dependencies: ["Clibpqxx", "Clibpq"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+            ]
+        ),
+        .target(
+            name: "PostgresKit",
+            dependencies: ["Clibpq", "Clibpqxx", "CPostgres", "SqlAdapterKit"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx)
+            ]
+        ),
+
     ],
     cxxLanguageStandard: .cxx20
 )
