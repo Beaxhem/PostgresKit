@@ -6,12 +6,30 @@
 //
 
 #pragma once
+
 #include <iostream>
 #include <result.hxx>
+#include <swift/bridging>
 
-struct Connection {
+class Connection {
+public:
     void* connection;
-    Connection(void* connection);
-};
+    size_t count = 0;
 
-const Result<Connection> newConnection(const char* connectionString);
+    Connection(void* connection);
+    Connection(const Connection &) = delete;
+    ~Connection();
+} SWIFT_SHARED_REFERENCE(retainConnection, releaseConnection);
+
+inline void retainConnection(Connection* connection) {
+    connection->count++;
+}
+
+inline void releaseConnection(Connection* connection) {
+    connection->count--;
+    if (connection->count == 0) {
+        delete connection;
+    }
+}
+
+const Result<Connection*> newConnection(const char* connectionString);

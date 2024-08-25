@@ -28,4 +28,4 @@ public:
     QueryResult(std::vector<std::string> columns, std::vector<Row> rows);
 };
 
-const Result<QueryResult> query(Connection connection, const char* query);
+const Result<QueryResult> query(Connection* connection, const char* query);

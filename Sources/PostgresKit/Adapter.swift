@@ -8,25 +8,27 @@
 import CPostgres
 import SqlAdapterKit
 
-enum PostgresError: Swift.Error {
-    case connectionFailed
-    case dbError(String)
-}
-
-public struct PostgresAdapter {
+public final class PostgresAdapter {
 
     let connection: Connection
 
-    public static func connect(configuration: SqlAdapterKit.Configuration) -> Result<PostgresAdapter, Swift.Error> {
+    init(connection: Connection) {
+        self.connection = connection
+    }
+
+    public static func connect(configuration: SqlAdapterKit.Configuration) -> Result<PostgresAdapter, QueryError> {
         let result = configuration.connectionString.withCString { pointer in
             CPostgres.newConnection(pointer)
         }
         guard !result.hasError() else {
             let error = result.getError()
-            return .failure(PostgresError.dbError(String(error.message)))
+            return .failure(.init(message: String(error.message)))
         }
 
-        let connection = result.getValue()
+        guard let connection = result.getValue() else {
+            return .failure(.init(message: "Internal error"))
+        }
+
         return .success(.init(connection: connection))
     }
 
@@ -34,14 +36,14 @@ public struct PostgresAdapter {
 
 extension PostgresAdapter: SqlAdapter {
 
-    public func query(_ query: String) -> Result<[String], Swift.Error> {
+    public func query(_ query: String) -> Result<[String], QueryError> {
         let result = query.withCString { pointer in
             CPostgres.query(connection, pointer)
         }
 
         guard result.isSuccess() else {
             let error = result.getError()
-            return .failure(PostgresError.dbError(String(error.message)))
+            return .failure(.init(message: String(error.message)))
         }
 
         let queryResult = result.getValue()

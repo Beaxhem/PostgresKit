@@ -9,11 +9,11 @@
 #include <swift/bridging>
 #include <stdexcept>
 
-pqxx::connection* getConnection(Connection connection) {
-    return static_cast<pqxx::connection*>(connection.connection);
+pqxx::connection* getConnection(Connection* connection) {
+    return static_cast<pqxx::connection*>(connection->connection);
 }
 
-const Result<QueryResult> query(Connection connection, const char* query) SWIFT_RETURNS_INDEPENDENT_VALUE {
+const Result<QueryResult> query(Connection* connection, const char* query) SWIFT_RETURNS_INDEPENDENT_VALUE {
     try {
         pqxx::connection* c = getConnection(connection);
         pqxx::work w(*c);
