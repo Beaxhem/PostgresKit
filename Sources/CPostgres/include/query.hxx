@@ -16,6 +16,7 @@
 struct Field {
     unsigned int type;
     std::string value;
+    bool isNull;
 };
 
 using Row = std::vector<Field>;

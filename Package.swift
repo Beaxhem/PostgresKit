@@ -44,7 +44,6 @@ let package = Package(
                 .interoperabilityMode(.Cxx)
             ]
         ),
-
     ],
     cxxLanguageStandard: .cxx20
 )

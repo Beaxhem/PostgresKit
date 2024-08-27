@@ -35,7 +35,7 @@ const Result<QueryResult> query(Connection* connection, const char* query) SWIFT
             row.reserve(r.size());
 
             for (pqxx::field f : r) {
-                row.emplace_back(f.type(), std::string(f.view()));
+                row.emplace_back(f.type(), std::string(f.view()), f.is_null());
             }
 
             rows.emplace_back(std::move(row));

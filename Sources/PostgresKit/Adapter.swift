@@ -5,6 +5,7 @@
 //  Created by Illia Senchukov on 23.08.2024.
 //
 
+import Foundation
 import CPostgres
 import SqlAdapterKit
 
@@ -36,20 +37,32 @@ public final class PostgresAdapter {
 
 extension PostgresAdapter: SqlAdapter {
 
-    public func query(_ query: String) -> Result<[String], QueryError> {
+    public func query(_ query: String) -> Result<SqlAdapterKit.QueryResult, QueryError> {
+        let start = CFAbsoluteTimeGetCurrent()
         let result = query.withCString { pointer in
             CPostgres.query(connection, pointer)
         }
-
+        print("Query took \(CFAbsoluteTimeGetCurrent() - start) seconds")
         guard result.isSuccess() else {
             let error = result.getError()
             return .failure(.init(message: String(error.message)))
         }
 
+        let mapStart = CFAbsoluteTimeGetCurrent()
         let queryResult = result.getValue()
 
-        print("Query result:", queryResult.rows.count)
-        return .success([])
+        let columns = queryResult.columns.map { String($0) }
+
+        let rows = queryResult.rows.enumerated().map {
+            SqlAdapterKit.Row(idx: UInt32($0), columns: columns, data: $1.map {
+                SqlAdapterKit.Field(type: $0.type,
+                                    value: String($0.value),
+                                    isNull: $0.isNull)
+            })
+        }
+
+        print("Mapping took \(CFAbsoluteTimeGetCurrent() - mapStart) seconds")
+        return .success(.init(columns: columns, rows: rows))
     }
 
     public func execute(_ query: String) {
