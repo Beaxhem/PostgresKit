@@ -9,6 +9,19 @@ import Foundation
 import CPostgres
 import SqlAdapterKit
 
+public typealias OId = UInt32
+
+public class PostgresColumn: SqlAdapterKit.Column {
+
+    let tableOid: OId
+
+    public init(id: Int, name: String, tableOid: OId) {
+        self.tableOid = tableOid
+        super.init(id: id, name: name)
+    }
+
+}
+
 public final class PostgresAdapter {
 
     let connection: Connection
@@ -51,10 +64,12 @@ extension PostgresAdapter: SqlAdapter {
         let mapStart = CFAbsoluteTimeGetCurrent()
         let queryResult = result.getValue()
 
-        let columns = queryResult.columns.map { String($0) }
+        let columns = queryResult.columns.enumerated().map { idx, column in
+            PostgresColumn(id: idx, name: .init(column.name), tableOid: column.table)
+        }
 
-        let rows = queryResult.rows.enumerated().map {
-            SqlAdapterKit.Row(idx: UInt32($0), columns: columns, data: $1.map {
+        let rows = queryResult.rows.map {
+            SqlAdapterKit.Row(data: $0.map {
                 SqlAdapterKit.Field(type: $0.type,
                                     value: String($0.value),
                                     isNull: $0.isNull)

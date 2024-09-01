@@ -21,12 +21,17 @@ struct Field {
 
 using Row = std::vector<Field>;
 
+struct Column {
+    std::string name;
+    unsigned int table; // oid
+};
+
 struct QueryResult {
 public:
-    std::vector<std::string> columns;
+    std::vector<Column> columns;
     std::vector<Row> rows;
 
-    QueryResult(std::vector<std::string> columns, std::vector<Row> rows);
+    QueryResult(std::vector<Column> columns, std::vector<Row> rows);
 };
 
 const Result<QueryResult> query(Connection* connection, const char* query);

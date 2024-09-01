@@ -23,11 +23,14 @@ const Result<QueryResult> query(Connection* connection, const char* query) SWIFT
         std::vector<Row> rows = {};
         rows.reserve(result.size());
 
-        std::vector<std::string> columns;
+        std::vector<Column> columns;
         columns.reserve(result.columns());
 
-        for (int i = 0; i < result.columns(); ++i) {
-            columns.emplace_back(std::string(result.column_name(i)));
+        for (int column = 0; column < result.columns(); ++column) {
+            std::string column_name = result.column_name(column);
+            pqxx::oid table_oid = result.column_table(column);
+
+            columns.emplace_back(column_name, table_oid);
         }
 
         for (pqxx::row r : result) {
@@ -51,7 +54,7 @@ const Result<QueryResult> query(Connection* connection, const char* query) SWIFT
     }
 }
 
-QueryResult::QueryResult(std::vector<std::string> columns, std::vector<Row> rows) {
+QueryResult::QueryResult(std::vector<Column> columns, std::vector<Row> rows) {
     this->columns = columns;
     this->rows = rows;
 }
