@@ -11,13 +11,17 @@ import SqlAdapterKit
 
 public typealias OId = UInt32
 
-public class PostgresColumn: SqlAdapterKit.Column {
+public struct PostgresColumn: SqlAdapterKit.Column {
+
+    public let id: Int
+    public let name: String
 
     let tableOid: OId
 
     public init(id: Int, name: String, tableOid: OId) {
-        self.tableOid = tableOid
-        super.init(id: id, name: name)
+        self.id = id
+        self.name = name
+        self.tableOid = tableOid        
     }
 
 }
