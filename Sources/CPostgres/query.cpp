@@ -54,6 +54,30 @@ const Result<QueryResult> query(Connection* connection, const char* query) SWIFT
     }
 }
 
+const Result<Row> queryOne(Connection* connection, const char* query) SWIFT_RETURNS_INDEPENDENT_VALUE {
+    try {
+        pqxx::connection* c = getConnection(connection);
+        pqxx::work w(*c);
+
+
+        pqxx::row result = w.exec1(query);
+        Row row = {};
+
+        for (int column = 0; column < result.size(); column ++) {
+            for (pqxx::field f : result) {
+                row.emplace_back(f.type(), std::string(f.view()), f.is_null());
+            }
+        }
+        w.commit();
+
+        return Result<Row>(row);
+    } catch (std::exception const &e) {
+        return Result<Row>(Error(e));
+    } catch (...) {
+        return Result<Row>(Error("Unknown error"));
+    }
+}
+
 QueryResult::QueryResult(std::vector<Column> columns, std::vector<Row> rows) {
     this->columns = columns;
     this->rows = rows;

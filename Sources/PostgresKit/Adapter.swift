@@ -88,4 +88,20 @@ extension PostgresAdapter: SqlAdapter {
 
     }
 
+    public func tableName(of column: any SqlAdapterKit.Column) -> Result<String, QueryError> {
+        guard let column = column as? PostgresColumn else { return .failure(.init(message: "Unsupported column type")) }
+
+        let result = CPostgres.queryOne(connection, "SELECT relname FROM pg_class WHERE oid = \(column.tableOid)")
+
+        guard result.isSuccess() else {
+            let error = result.getError()
+            return .failure(.init(message: String(error.message)))
+        }
+
+        let row = result.getValue()
+        guard let first = row.first else { return .failure(.init(message: "Something went wrong.")) }
+
+        return .success(.init(first.value))
+    }
+
 }

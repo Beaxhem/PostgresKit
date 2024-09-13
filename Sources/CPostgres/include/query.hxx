@@ -34,4 +34,6 @@ public:
     QueryResult(std::vector<Column> columns, std::vector<Row> rows);
 };
 
+
 const Result<QueryResult> query(Connection* connection, const char* query);
+const Result<Row> queryOne(Connection* connection, const char* query);
