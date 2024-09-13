@@ -9,99 +9,55 @@ import Foundation
 import CPostgres
 import SqlAdapterKit
 
-public typealias OId = UInt32
-
-public struct PostgresColumn: SqlAdapterKit.Column {
-
-    public let id: Int
-    public let name: String
-
-    let tableOid: OId
-
-    public init(id: Int, name: String, tableOid: OId) {
-        self.id = id
-        self.name = name
-        self.tableOid = tableOid        
-    }
-
-}
-
-public final class PostgresAdapter {
+public final class PostgresAdapter: SqlAdapter {
 
     let connection: Connection
 
-    init(connection: Connection) {
+    private let info: DbInfo
+
+    init(connection: Connection) async {
         self.connection = connection
+        self.info = .init(connection: connection)
+
+        await info.collect()
     }
 
-    public static func connect(configuration: SqlAdapterKit.Configuration) -> Result<PostgresAdapter, QueryError> {
+    public static func connect(configuration: SqlAdapterKit.Configuration) async throws(QueryError) -> PostgresAdapter {
         let result = configuration.connectionString.withCString { pointer in
             CPostgres.newConnection(pointer)
         }
         guard !result.hasError() else {
             let error = result.getError()
-            return .failure(.init(message: String(error.message)))
+            throw .init(message: String(error.message))
         }
 
         guard let connection = result.getValue() else {
-            return .failure(.init(message: "Internal error"))
+            throw .init(message: "Internal error")
         }
 
-        return .success(.init(connection: connection))
+        return await .init(connection: connection)
     }
 
 }
 
-extension PostgresAdapter: SqlAdapter {
+extension PostgresAdapter {
 
-    public func query(_ query: String) -> Result<SqlAdapterKit.QueryResult, QueryError> {
+    public func query(_ query: String) throws(QueryError) -> SqlAdapterKit.QueryResult {
         let start = CFAbsoluteTimeGetCurrent()
-        let result = query.withCString { pointer in
-            CPostgres.query(connection, pointer)
+        defer {
+            print("Query took \(CFAbsoluteTimeGetCurrent() - start) seconds")
         }
-        print("Query took \(CFAbsoluteTimeGetCurrent() - start) seconds")
-        guard result.isSuccess() else {
-            let error = result.getError()
-            return .failure(.init(message: String(error.message)))
-        }
-
-        let mapStart = CFAbsoluteTimeGetCurrent()
-        let queryResult = result.getValue()
-
-        let columns = queryResult.columns.enumerated().map { idx, column in
-            PostgresColumn(id: idx, name: .init(column.name), tableOid: column.table)
-        }
-
-        let rows = queryResult.rows.map {
-            SqlAdapterKit.Row(data: $0.map {
-                SqlAdapterKit.Field(type: $0.type,
-                                    value: String($0.value),
-                                    isNull: $0.isNull)
-            })
-        }
-
-        print("Mapping took \(CFAbsoluteTimeGetCurrent() - mapStart) seconds")
-        return .success(.init(columns: columns, rows: rows))
+        return try connection.query(query)
     }
 
-    public func execute(_ query: String) {
+    public func table(for column: any SqlAdapterKit.Column) -> (any SqlTable)? {
+        guard let column = column as? PostgresColumn else { return nil }
 
+        return info.oidToTable[column.tableOid]
     }
 
-    public func tableName(of column: any SqlAdapterKit.Column) -> Result<String, QueryError> {
-        guard let column = column as? PostgresColumn else { return .failure(.init(message: "Unsupported column type")) }
-
-        let result = CPostgres.queryOne(connection, "SELECT relname FROM pg_class WHERE oid = \(column.tableOid)")
-
-        guard result.isSuccess() else {
-            let error = result.getError()
-            return .failure(.init(message: String(error.message)))
-        }
-
-        let row = result.getValue()
-        guard let first = row.first else { return .failure(.init(message: "Something went wrong.")) }
-
-        return .success(.init(first.value))
+    public func fetchTables() throws(QueryError) -> [any SqlTable] {
+        Array(info.oidToTable.values)
     }
 
 }
