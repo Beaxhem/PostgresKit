@@ -9,7 +9,7 @@ import Foundation
 import CPostgres
 import SqlAdapterKit
 
-public class DbInfo {
+public class DbInfo: MetaInfo {
 
     let connection: Connection
 
@@ -28,11 +28,15 @@ public class DbInfo {
         self.connection = connection
     }
 
+    public func reload() async {
+        await collect()
+    }
+
 }
 
 extension DbInfo {
 
-    func collect() {
+    func collect() async {
         do {
             self.oidToType = try fetchTypes()
             self.tables = try fetchTables()

@@ -13,13 +13,9 @@ public final class PostgresAdapter: SqlAdapter {
 
     let connection: Connection
 
-    private let info: DbInfo
-
     init(connection: Connection) async {
         self.connection = connection
-        self.info = .init(connection: connection)
 
-        await info.collect()
     }
 
     public static func connect(configuration: SqlAdapterKit.Configuration) async throws(QueryError) -> PostgresAdapter {
@@ -38,11 +34,19 @@ public final class PostgresAdapter: SqlAdapter {
         return await .init(connection: connection)
     }
 
+    public func metaInfo() async throws(QueryError) -> any MetaInfo {
+        let info = DbInfo(connection: connection)
+
+        await info.collect()
+
+        return info
+    }
+
 }
 
-extension PostgresAdapter {
+public extension PostgresAdapter {
 
-    public func query(_ query: String) throws(QueryError) -> SqlAdapterKit.QueryResult {
+    func query(_ query: String) throws(QueryError) -> SqlAdapterKit.QueryResult {
         let start = CFAbsoluteTimeGetCurrent()
         defer {
             print("Query took \(CFAbsoluteTimeGetCurrent() - start) seconds")
@@ -50,14 +54,18 @@ extension PostgresAdapter {
         return try connection.query(query)
     }
 
-    public func table(for column: any SqlAdapterKit.Column) -> (any SqlTable)? {
-        guard let column = column as? PostgresColumn else { return nil }
+    func table(for column: any SqlAdapterKit.Column, meta: MetaInfo?) -> (any SqlTable)? {
+        guard let column = column as? PostgresColumn,
+              let meta = meta as? DbInfo else {
+            return nil
+        }
 
-        return info.oidToTable[column.tableOid]
+        return meta.oidToTable[column.tableOid]
     }
 
-    public func fetchTables() throws(QueryError) -> [any SqlTable] {
-        Array(info.oidToTable.values)
+    func fetchTables(meta: MetaInfo?) throws(QueryError) -> [any SqlTable] {
+        guard let meta = meta as? DbInfo else { return [] }
+        return Array(meta.oidToTable.values)
     }
 
 }
