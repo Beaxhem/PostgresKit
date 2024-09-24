@@ -56,12 +56,13 @@ private extension DbInfo {
         typesInfo.reserveCapacity(result.rows.count)
 
         for row in result.rows {
-            let oidString = row.data[0].value
+            guard let oidString = row.data[0].value,
+                  let typname = row.data[1].value,
+                  let typcategoryString = row.data[2].value else {
+                continue
+            }
+
             let oid = OId(oidString) ?? 0
-
-            let typname = row.data[1].value
-
-            let typcategoryString = row.data[2].value
             let typeCategory = TypeCategory(rawValue: typcategoryString) ?? .unknown
 
             typesInfo[oid] = PostgresType(name: typname, category: typeCategory)
@@ -83,10 +84,13 @@ SELECT
 FROM tables
 """
         let result = try connection.query(sqlQuery)
-        return result.rows.map { row in
-            let schema = row.data[0].value
-            let name = row.data[1].value
-            let oidString = row.data[2].value
+        return result.rows.compactMap { row in
+            guard row.data.count == 3,
+                  let schema = row.data[0].value,
+                  let name = row.data[1].value,
+                  let oidString = row.data[2].value else {
+                return nil
+            }
             let oid = OId(oidString) ?? 0
 
             return PostgresTable(tableSchema: schema, name: name, oid: oid)

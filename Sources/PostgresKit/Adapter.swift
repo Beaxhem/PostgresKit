@@ -9,13 +9,12 @@ import Foundation
 import CPostgres
 import SqlAdapterKit
 
-public final class PostgresAdapter: SqlAdapter {
+public final class PostgresAdapter: SqlAdapter, Sendable {
 
     let connection: Connection
 
     init(connection: Connection) async {
         self.connection = connection
-
     }
 
     public static func connect(configuration: SqlAdapterKit.Configuration) async throws(QueryError) -> PostgresAdapter {

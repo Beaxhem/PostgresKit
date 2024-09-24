@@ -27,11 +27,14 @@ extension Connection {
             PostgresColumn(id: idx, name: .init(column.name), tableOid: column.table)
         }
 
+        var id = 0
         let rows = queryResult.rows.map {
-            SqlAdapterKit.Row(data: $0.map {
-                SqlAdapterKit.Field(type: $0.type,
-                                    value: String($0.value),
-                                    isNull: $0.isNull)
+            defer { id += 1}
+
+            return SqlAdapterKit.GenericRow(id: id,
+                                     data: $0.map {
+                SqlAdapterKit.GenericField(type: $0.type,
+                                           value: $0.isNull ? nil : String($0.value))
             })
         }
 
