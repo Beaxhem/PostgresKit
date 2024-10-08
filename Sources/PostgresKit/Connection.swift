@@ -11,7 +11,7 @@ import SqlAdapterKit
 
 extension Connection {
 
-    func query(_ query: String) throws(QueryError) -> SqlAdapterKit.QueryResult {
+    func query(_ query: String, metaInfo: DbInfo) throws(QueryError) -> SqlAdapterKit.QueryResult {
         let result = query.withCString { pointer in
             CPostgres.query(self, pointer)
         }
@@ -24,7 +24,13 @@ extension Connection {
         let queryResult = result.getValue()
 
         let columns = queryResult.columns.enumerated().map { idx, column in
-            PostgresColumn(id: idx, name: .init(column.name), tableOid: column.table)
+            let type = metaInfo.oidToType(column.type) ?? .init(name: "UKNOWN", category: .unknown)
+            return PostgresColumn(
+                id: idx,
+                name: .init(column.name),
+                tableOid: column.table,
+                type: type.genericType
+            )
         }
 
         var id = 0

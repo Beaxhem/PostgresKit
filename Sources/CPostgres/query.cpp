@@ -16,7 +16,7 @@ pqxx::connection* getConnection(Connection* connection) {
 const Result<QueryResult> query(Connection* connection, const char* query) SWIFT_RETURNS_INDEPENDENT_VALUE {
     try {
         pqxx::connection* c = getConnection(connection);
-        pqxx::work w(*c);
+        pqxx::nontransaction w(*c);
 
         pqxx::result result = w.exec(query);
 
@@ -29,8 +29,9 @@ const Result<QueryResult> query(Connection* connection, const char* query) SWIFT
         for (int column = 0; column < result.columns(); ++column) {
             std::string column_name = result.column_name(column);
             pqxx::oid table_oid = result.column_table(column);
+            pqxx::oid type = result.column_type(column);
 
-            columns.emplace_back(column_name, table_oid);
+            columns.emplace_back(column_name, table_oid, type);
         }
 
         for (pqxx::row r : result) {

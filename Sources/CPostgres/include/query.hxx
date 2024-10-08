@@ -20,10 +20,12 @@ struct Field {
 };
 
 using Row = std::vector<Field>;
+using oid = unsigned int;
 
 struct Column {
     std::string name;
-    unsigned int table; // oid
+    oid table;
+    oid type;
 };
 
 struct QueryResult {

@@ -15,13 +15,15 @@ public struct PostgresColumn: SqlAdapterKit.Column {
 
     public let id: Int
     public let name: String
+    public let type: GenericType
 
     let tableOid: OId
 
-    public init(id: Int, name: String, tableOid: OId) {
+    init(id: Int, name: String, tableOid: OId, type: GenericType) {
         self.id = id
         self.name = name
         self.tableOid = tableOid
+        self.type = type
     }
 
 }
@@ -54,26 +56,96 @@ public class PostgresTable: SqlTable {
 
 }
 
-enum TypeCategory: String {
-    case array = "A"
-    case boolean = "B"
-    case composite = "C"
-    case datetime = "D"
-    case `enum` = "E"
-    case geometric = "G"
-    case networkAddress = "I"
+enum PostgresTypeCategory: String {
     case numeric = "N"
-    case pseudo = "P"
-    case range = "R"
+    case boolean = "B"
     case string = "S"
+    case array = "A"
+    case datetime = "D"
     case timespan = "T"
+    case `enum` = "E"
     case userDefined = "U"
+
+    case geometric = "G"
+    case composite = "C"
+    case networkAddress = "I"
+
+    case range = "R"
     case bitString = "V"
+
+    case pseudo = "P"
     case unknown = "X"
     case `internal` = "Z"
 }
 
-struct PostgresType {
+struct PostgresType: SqlType {
+
     let name: String
-    let category: TypeCategory
+    private let category: PostgresTypeCategory
+
+    init(name: String, category: PostgresTypeCategory) {
+        self.name = name
+        self.category = category
+    }
+
+    var genericType: GenericType {
+        .init(name: name, category: genericCategory)
+    }
+
+    var genericCategory: TypeCategory {
+        switch category {
+        case .numeric:
+            switch name {
+            case "smallint", "integer", "bigint", "numeric", "int2", "int4", "int8":
+                .integer
+            case "real", "double precision", "float4", "float8":
+                .float
+            case "regprocedure", "regoper", "regoperator", "regclass", "regcollation", "regtype", "regrole", "regnamespace":
+                .system
+            default:
+                .float
+            }
+        case .boolean:
+            .boolean
+        case .string:
+            switch name {
+            case "char":
+                .nchar
+            case "varchar":
+                .varchar
+            default:
+                .text
+            }
+        case .array:
+            .array
+        case .datetime:
+            switch name {
+            case "date":
+                .date
+            case "time":
+                .time
+            case "timestamp":
+                .datetime
+            default:
+                .datetime
+            }
+        case .timespan:
+            .interval
+        case .enum:
+            .enumeration
+        case .userDefined:
+            .userDefined
+        case .geometric, .composite, .networkAddress, .range:
+            .unknown
+        case .bitString:
+            .binary
+        case .pseudo:
+            .system
+        case .unknown:
+            .unknown
+        case .internal:
+            .system
+        }
+    }
+
 }

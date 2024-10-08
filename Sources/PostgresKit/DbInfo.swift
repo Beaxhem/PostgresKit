@@ -13,14 +13,15 @@ public class DbInfo: MetaInfo {
 
     let connection: Connection
 
-    private(set) var oidToType: [OId: PostgresType] = [:]
-    private(set) var oidToTable: [OId: PostgresTable] = [:]
+    private var _oidToType: [OId: PostgresType] = [:]
+    private var _oidToTable: [OId: Int] = [:]
 
-    private var tables: [PostgresTable] = [] {
+    private(set) var tables: [PostgresTable] = [] {
         didSet {
-            oidToTable = tables.reduce(into: [:], { partialResult, table in
-                partialResult[table.oid] = table
-            })
+            _oidToTable = tables.enumerated().reduce(into: [:]) { (partialResult, arg1) in
+                let (idx, table) = arg1
+                partialResult[table.oid] = idx
+            }
         }
     }
 
@@ -38,7 +39,7 @@ extension DbInfo {
 
     func collect() async {
         do {
-            self.oidToType = try fetchTypes()
+            self._oidToType = try fetchTypes()
             self.tables = try fetchTables()
         } catch {
             print("Couldn't collect db info: \(error.message)")
@@ -47,10 +48,26 @@ extension DbInfo {
 
 }
 
+extension DbInfo {
+
+    func oidToTable(_ oid: OId) -> PostgresTable? {
+        guard let idx = _oidToTable[oid] else { return nil }
+
+        guard idx < tables.count else { return nil }
+
+        return tables[idx]
+    }
+
+    func oidToType(_ oid: OId) -> PostgresType? {
+        _oidToType[oid]
+    }
+
+}
+
 private extension DbInfo {
 
     func fetchTypes() throws (QueryError) -> [OId: PostgresType] {
-        let result = try connection.query("select oid, typname, typcategory from pg_type")
+        let result = try connection.query("select oid, typname, typcategory from pg_type", metaInfo: self)
 
         var typesInfo: [OId: PostgresType] = [:]
         typesInfo.reserveCapacity(result.rows.count)
@@ -63,7 +80,7 @@ private extension DbInfo {
             }
 
             let oid = OId(oidString) ?? 0
-            let typeCategory = TypeCategory(rawValue: typcategoryString) ?? .unknown
+            let typeCategory = PostgresTypeCategory(rawValue: typcategoryString) ?? .unknown
 
             typesInfo[oid] = PostgresType(name: typname, category: typeCategory)
         }
@@ -83,7 +100,7 @@ SELECT
     CONCAT('"', table_schema, '"."', table_name, '"')::regclass::oid as oid
 FROM tables
 """
-        let result = try connection.query(sqlQuery)
+        let result = try connection.query(sqlQuery, metaInfo: self)
         return result.rows.compactMap { row in
             guard row.data.count == 3,
                   let schema = row.data[0].value,

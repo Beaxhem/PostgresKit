@@ -45,12 +45,15 @@ public final class PostgresAdapter: SqlAdapter, Sendable {
 
 public extension PostgresAdapter {
 
-    func query(_ query: String) throws(QueryError) -> SqlAdapterKit.QueryResult {
+    func query(_ query: String, metaInfo: MetaInfo?) throws(QueryError) -> SqlAdapterKit.QueryResult {
+        guard let metaInfo = metaInfo as? DbInfo else { throw .init(message: "Unsupported meta info type") }
+
         let start = CFAbsoluteTimeGetCurrent()
         defer {
             print("Query took \(CFAbsoluteTimeGetCurrent() - start) seconds")
         }
-        return try connection.query(query)
+
+        return try connection.query(query, metaInfo: metaInfo)
     }
 
     func table(for column: any SqlAdapterKit.Column, meta: MetaInfo?) -> (any SqlTable)? {
@@ -59,12 +62,12 @@ public extension PostgresAdapter {
             return nil
         }
 
-        return meta.oidToTable[column.tableOid]
+        return meta.oidToTable(column.tableOid)
     }
 
     func fetchTables(meta: MetaInfo?) throws(QueryError) -> [any SqlTable] {
         guard let meta = meta as? DbInfo else { return [] }
-        return Array(meta.oidToTable.values)
+        return meta.tables
     }
 
 }
