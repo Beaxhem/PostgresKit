@@ -70,4 +70,13 @@ public extension PostgresAdapter {
         return meta.tables
     }
 
+    public func primaryKeys(for table: any SqlTable, meta: (any MetaInfo)?) -> Set<String>? {
+        guard let table = table as? PostgresTable,
+              let meta = meta as? DbInfo else {
+            return []
+        }
+
+        return meta.oidToPrimaryKeys(table.oid)
+    }
+
 }

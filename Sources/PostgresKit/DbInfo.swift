@@ -15,6 +15,7 @@ public class DbInfo: MetaInfo {
 
     private var _oidToType: [OId: PostgresType] = [:]
     private var _oidToTable: [OId: Int] = [:]
+    private var _tableToPrimaryKeyNames: [OId: Set<String>] = [:]
 
     private(set) var tables: [PostgresTable] = [] {
         didSet {
@@ -41,6 +42,7 @@ extension DbInfo {
         do {
             self._oidToType = try fetchTypes()
             self.tables = try fetchTables()
+            self._tableToPrimaryKeyNames = try fetchPrimaryKeys()
         } catch {
             print("Couldn't collect db info: \(error.message)")
         }
@@ -60,6 +62,10 @@ extension DbInfo {
 
     func oidToType(_ oid: OId) -> PostgresType? {
         _oidToType[oid]
+    }
+
+    func oidToPrimaryKeys(_ oid: OId) -> Set<String>? {
+        _tableToPrimaryKeyNames[oid]
     }
 
 }
@@ -111,6 +117,36 @@ FROM tables
             let oid = OId(oidString) ?? 0
 
             return PostgresTable(tableSchema: schema, name: name, oid: oid)
+        }
+    }
+
+    func fetchPrimaryKeys() throws(QueryError) -> [OId: Set<String>] {
+        let sqlQuery = """
+SELECT
+    tc.table_name::regclass::oid, column_name
+FROM 
+    information_schema.table_constraints tc
+JOIN 
+    information_schema.key_column_usage kcu
+    ON tc.constraint_name = kcu.constraint_name
+    AND tc.table_schema = kcu.table_schema
+WHERE 
+    tc.constraint_type = 'PRIMARY KEY'
+"""
+        let result = try connection.query(sqlQuery, metaInfo: self)
+
+        var primaryKeysMap = [OId: Set<String>]()
+        primaryKeysMap.reserveCapacity(result.rows.count)
+
+        return result.rows.reduce(into: primaryKeysMap) { partialResult, row in
+            guard row.data.count == 2,
+                  let oidString = row.data[0].value,
+                  let columnName = row.data[1].value else {
+                return
+            }
+            let oid = OId(oidString) ?? 0
+
+            partialResult[oid, default: []].insert(columnName)
         }
     }
 

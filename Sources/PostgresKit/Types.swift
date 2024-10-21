@@ -46,7 +46,7 @@ public class PostgresTable: SqlTable {
 
     let name: String
 
-    let oid: OId
+    public let oid: OId
 
     init(tableSchema: String, name: String, oid: OId) {
         self.tableSchema = tableSchema
