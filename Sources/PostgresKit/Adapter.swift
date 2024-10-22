@@ -6,12 +6,12 @@
 //
 
 import Foundation
-import CPostgres
+@preconcurrency import CPostgres
 import SqlAdapterKit
 
 public final class PostgresAdapter: SqlAdapter, Sendable {
 
-    let connection: Connection
+    private let connection: Connection
 
     init(connection: Connection) async {
         self.connection = connection
@@ -70,7 +70,7 @@ public extension PostgresAdapter {
         return meta.tables
     }
 
-    public func primaryKeys(for table: any SqlTable, meta: (any MetaInfo)?) -> Set<String>? {
+    func primaryKeys(for table: any SqlTable, meta: (any MetaInfo)?) -> Set<String>? {
         guard let table = table as? PostgresTable,
               let meta = meta as? DbInfo else {
             return []

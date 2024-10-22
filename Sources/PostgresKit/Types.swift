@@ -7,7 +7,6 @@
 
 import Foundation
 import SqlAdapterKit
-import CPostgres
 
 public typealias OId = UInt32
 
@@ -28,7 +27,7 @@ public struct PostgresColumn: SqlAdapterKit.Column {
 
 }
 
-public class PostgresTable: SqlTable {
+public final class PostgresTable: SqlTable {
 
     public var id: Int {
         .init(oid)

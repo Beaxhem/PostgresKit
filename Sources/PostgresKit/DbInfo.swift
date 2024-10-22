@@ -9,7 +9,7 @@ import Foundation
 import CPostgres
 import SqlAdapterKit
 
-public class DbInfo: MetaInfo {
+public final class DbInfo: MetaInfo, @unchecked Sendable {
 
     let connection: Connection
 
