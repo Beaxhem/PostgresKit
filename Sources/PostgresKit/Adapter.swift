@@ -9,12 +9,47 @@ import Foundation
 @preconcurrency import CPostgres
 import SqlAdapterKit
 
-public final class PostgresAdapter: SqlAdapter, Sendable {
+public struct PostgresConfiguration: Configuration, Sendable {
+
+    public var username: String
+    public var password: String
+    public var host: String
+    public var port: Int16
+    public var database: String?
+
+    public var connectionString: String {
+        "postgres://\(username):\(password)@\(host):\(port)/\(database ?? "")"
+    }
+
+    public init(username: String, password: String, host: String, port: Int16, database: String?) {
+        self.username = username
+        self.password = password
+        self.host = host
+        self.port = port
+        self.database = database
+    }
+
+}
+
+extension PostgresConfiguration: DatabaseConnectionConfig {
+
+    public consuming func withDatabase(_ database: String?) -> PostgresConfiguration {
+        .init(username: username, password: password, host: host, port: port, database: database)
+    }
+
+}
+
+public final actor PostgresAdapter: SqlAdapter, Sendable {
 
     private let connection: Connection
 
+    private let metaInfo: DbInfo
+
     init(connection: Connection) async {
         self.connection = connection
+        self.metaInfo = .init()
+
+        await metaInfo.reload(connection: connection)
     }
 
     public static func connect(configuration: SqlAdapterKit.Configuration) async throws(QueryError) -> PostgresAdapter {
@@ -33,21 +68,11 @@ public final class PostgresAdapter: SqlAdapter, Sendable {
         return await .init(connection: connection)
     }
 
-    public func metaInfo() async throws(QueryError) -> any MetaInfo {
-        let info = DbInfo(connection: connection)
-
-        await info.collect()
-
-        return info
-    }
-
 }
 
 public extension PostgresAdapter {
 
-    func query(_ query: String, metaInfo: MetaInfo?) throws(QueryError) -> SqlAdapterKit.QueryResult {
-        guard let metaInfo = metaInfo as? DbInfo else { throw .init(message: "Unsupported meta info type") }
-
+    func query(_ query: String) throws(QueryError) -> SqlAdapterKit.QueryResult {
         let start = CFAbsoluteTimeGetCurrent()
         defer {
             print("Query took \(CFAbsoluteTimeGetCurrent() - start) seconds")
@@ -56,27 +81,32 @@ public extension PostgresAdapter {
         return try connection.query(query, metaInfo: metaInfo)
     }
 
-    func table(for column: any SqlAdapterKit.Column, meta: MetaInfo?) -> (any SqlTable)? {
-        guard let column = column as? PostgresColumn,
-              let meta = meta as? DbInfo else {
+    func table(for column: any SqlAdapterKit.Column) -> (any SqlTable)? {
+        guard let column = column as? PostgresColumn else {
             return nil
         }
 
-        return meta.oidToTable(column.tableOid)
+        return metaInfo.oidToTable(column.tableOid)
     }
 
-    func fetchTables(meta: MetaInfo?) throws(QueryError) -> [any SqlTable] {
-        guard let meta = meta as? DbInfo else { return [] }
-        return meta.tables
+    func fetchTables() throws(QueryError) -> [any SqlTable] {
+        return metaInfo.tables
     }
 
-    func primaryKeys(for table: any SqlTable, meta: (any MetaInfo)?) -> Set<String>? {
-        guard let table = table as? PostgresTable,
-              let meta = meta as? DbInfo else {
+    func primaryKeys(for table: any SqlTable) -> Set<String>? {
+        guard let table = table as? PostgresTable else {
             return []
         }
 
-        return meta.oidToPrimaryKeys(table.oid)
+        return metaInfo.oidToPrimaryKeys(table.oid)
+    }
+
+}
+
+extension PostgresAdapter: MetaInfoProvidingAdapter {
+
+    public func reloadMetaInfo() async throws(QueryError) {
+        await metaInfo.reload(connection: connection)
     }
 
 }

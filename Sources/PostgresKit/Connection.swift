@@ -13,7 +13,7 @@ extension Connection {
 
     func query(_ query: String, metaInfo: DbInfo) throws(QueryError) -> SqlAdapterKit.QueryResult {
         let result = query.withCString { pointer in
-            CPostgres.query(self, pointer)
+            CPostgres.postgres.query(self, pointer)
         }
         guard result.isSuccess() else {
             let error = result.getError()
@@ -39,8 +39,7 @@ extension Connection {
 
             return SqlAdapterKit.GenericRow(id: id,
                                      data: $0.map {
-                SqlAdapterKit.GenericField(type: $0.type,
-                                           value: $0.isNull ? nil : String($0.value))
+                SqlAdapterKit.GenericField(value: $0.isNull ? nil : String($0.value))
             })
         }
 

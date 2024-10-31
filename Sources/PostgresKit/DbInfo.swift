@@ -9,9 +9,7 @@ import Foundation
 import CPostgres
 import SqlAdapterKit
 
-public final class DbInfo: MetaInfo, @unchecked Sendable {
-
-    let connection: Connection
+public final class DbInfo: @unchecked Sendable {
 
     private var _oidToType: [OId: PostgresType] = [:]
     private var _oidToTable: [OId: Int] = [:]
@@ -26,23 +24,15 @@ public final class DbInfo: MetaInfo, @unchecked Sendable {
         }
     }
 
-    init(connection: Connection) {
-        self.connection = connection
-    }
-
-    public func reload() async {
-        await collect()
-    }
-
 }
 
-extension DbInfo {
+public extension DbInfo {
 
-    func collect() async {
+    func reload(connection: Connection) async {
         do {
-            self._oidToType = try fetchTypes()
-            self.tables = try fetchTables()
-            self._tableToPrimaryKeyNames = try fetchPrimaryKeys()
+            self._oidToType = try fetchTypes(connection: connection)
+            self.tables = try fetchTables(connection: connection)
+            self._tableToPrimaryKeyNames = try fetchPrimaryKeys(connection: connection)
         } catch {
             print("Couldn't collect db info: \(error.message)")
         }
@@ -72,7 +62,7 @@ extension DbInfo {
 
 private extension DbInfo {
 
-    func fetchTypes() throws (QueryError) -> [OId: PostgresType] {
+    func fetchTypes(connection: Connection) throws (QueryError) -> [OId: PostgresType] {
         let result = try connection.query("select oid, typname, typcategory from pg_type", metaInfo: self)
 
         var typesInfo: [OId: PostgresType] = [:]
@@ -94,7 +84,7 @@ private extension DbInfo {
         return typesInfo
     }
 
-    func fetchTables() throws (QueryError) -> [PostgresTable] {
+    func fetchTables(connection: Connection) throws (QueryError) -> [PostgresTable] {
         let sqlQuery = """
 with tables as (
     SELECT table_schema, table_name
@@ -120,7 +110,7 @@ FROM tables
         }
     }
 
-    func fetchPrimaryKeys() throws(QueryError) -> [OId: Set<String>] {
+    func fetchPrimaryKeys(connection: Connection) throws(QueryError) -> [OId: Set<String>] {
         let sqlQuery = """
 SELECT
     tc.table_name::regclass::oid, column_name

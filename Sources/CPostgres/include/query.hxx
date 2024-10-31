@@ -13,29 +13,32 @@
 #include <connection.hxx>
 #include <result.hxx>
 
-struct Field {
-    unsigned int type;
-    std::string value;
-    bool isNull;
-};
+namespace postgres {
 
-using Row = std::vector<Field>;
-using oid = unsigned int;
+    struct Field {
+        std::string value;
+        bool isNull;
+    };
 
-struct Column {
-    std::string name;
-    oid table;
-    oid type;
-};
+    using Row = std::vector<Field>;
+    using oid = unsigned int;
 
-struct QueryResult {
-public:
-    std::vector<Column> columns;
-    std::vector<Row> rows;
+    struct Column {
+        std::string name;
+        oid table;
+        oid type;
+    };
 
-    QueryResult(std::vector<Column> columns, std::vector<Row> rows);
-};
+    struct QueryResult {
+    public:
+        std::vector<Column> columns;
+        std::vector<Row> rows;
+
+        QueryResult(std::vector<Column> columns, std::vector<Row> rows);
+    };
 
 
-const Result<QueryResult> query(Connection* connection, const char* query);
-const Result<Row> queryOne(Connection* connection, const char* query);
+    const Result<QueryResult> query(Connection* connection, const char* query);
+    const Result<Row> queryOne(Connection* connection, const char* query);
+
+}
