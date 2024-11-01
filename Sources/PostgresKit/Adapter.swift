@@ -73,12 +73,7 @@ public final actor PostgresAdapter: SqlAdapter, Sendable {
 public extension PostgresAdapter {
 
     func query(_ query: String) throws(QueryError) -> SqlAdapterKit.QueryResult {
-        let start = CFAbsoluteTimeGetCurrent()
-        defer {
-            print("Query took \(CFAbsoluteTimeGetCurrent() - start) seconds")
-        }
-
-        return try connection.query(query, metaInfo: metaInfo)
+        try connection.query(query, metaInfo: metaInfo)
     }
 
     func table(for column: any SqlAdapterKit.Column) -> (any SqlTable)? {
@@ -90,7 +85,7 @@ public extension PostgresAdapter {
     }
 
     func fetchTables() throws(QueryError) -> [any SqlTable] {
-        return metaInfo.tables
+        metaInfo.tables
     }
 
     func primaryKeys(for table: any SqlTable) -> Set<String>? {

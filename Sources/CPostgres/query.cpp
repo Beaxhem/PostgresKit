@@ -15,17 +15,17 @@ namespace postgres {
         return static_cast<pqxx::connection*>(connection->connection);
     }
 
-    const Result<QueryResult> query(Connection* connection, const char* query) SWIFT_RETURNS_INDEPENDENT_VALUE {
+    const Result<PostgresQueryResult> query(Connection* connection, const char* query) SWIFT_RETURNS_INDEPENDENT_VALUE {
         try {
             pqxx::connection* c = getConnection(connection);
             pqxx::nontransaction w(*c);
 
             pqxx::result result = w.exec(query);
 
-            std::vector<Row> rows = {};
+            std::vector<PostgresRow> rows = {};
             rows.reserve(result.size());
 
-            std::vector<Column> columns;
+            std::vector<PostgresColumn> columns;
             columns.reserve(result.columns());
 
             for (int column = 0; column < result.columns(); ++column) {
@@ -37,7 +37,7 @@ namespace postgres {
             }
 
             for (pqxx::row r : result) {
-                Row row = {};
+                PostgresRow row = {};
                 row.reserve(r.size());
 
                 for (pqxx::field f : r) {
@@ -49,22 +49,21 @@ namespace postgres {
 
             w.commit();
 
-            return Result<QueryResult>(QueryResult(columns, rows));
+            return Result<PostgresQueryResult>(PostgresQueryResult(columns, rows));
         } catch (std::exception const &e) {
-            return Result<QueryResult>(Error(e));
+            return Result<PostgresQueryResult>(Error(e));
         } catch (...) {
-            return Result<QueryResult>(Error("Unknown error"));
+            return Result<PostgresQueryResult>(Error("Unknown error"));
         }
     }
 
-    const Result<Row> queryOne(Connection* connection, const char* query) SWIFT_RETURNS_INDEPENDENT_VALUE {
+    const Result<PostgresRow> queryOne(Connection* connection, const char* query) SWIFT_RETURNS_INDEPENDENT_VALUE {
         try {
             pqxx::connection* c = getConnection(connection);
             pqxx::work w(*c);
 
-
             pqxx::row result = w.exec1(query);
-            Row row = {};
+            PostgresRow row = {};
 
             for (int column = 0; column < result.size(); column ++) {
                 for (pqxx::field f : result) {
@@ -73,15 +72,15 @@ namespace postgres {
             }
             w.commit();
 
-            return Result<Row>(row);
+            return Result<PostgresRow>(row);
         } catch (std::exception const &e) {
-            return Result<Row>(Error(e));
+            return Result<PostgresRow>(Error(e));
         } catch (...) {
-            return Result<Row>(Error("Unknown error"));
+            return Result<PostgresRow>(Error("Unknown error"));
         }
     }
 
-    QueryResult::QueryResult(std::vector<Column> columns, std::vector<Row> rows) {
+    PostgresQueryResult::PostgresQueryResult(std::vector<PostgresColumn> columns, std::vector<PostgresRow> rows) {
         this->columns = columns;
         this->rows = rows;
     }

@@ -15,30 +15,30 @@
 
 namespace postgres {
 
-    struct Field {
+    struct PostgresField {
         std::string value;
         bool isNull;
     };
 
-    using Row = std::vector<Field>;
+    using PostgresRow = std::vector<PostgresField>;
     using oid = unsigned int;
 
-    struct Column {
+    struct PostgresColumn {
         std::string name;
         oid table;
         oid type;
     };
 
-    struct QueryResult {
+    struct PostgresQueryResult {
     public:
-        std::vector<Column> columns;
-        std::vector<Row> rows;
+        std::vector<PostgresColumn> columns;
+        std::vector<PostgresRow> rows;
 
-        QueryResult(std::vector<Column> columns, std::vector<Row> rows);
+        PostgresQueryResult(std::vector<PostgresColumn> columns, std::vector<PostgresRow> rows);
     };
 
 
-    const Result<QueryResult> query(Connection* connection, const char* query);
-    const Result<Row> queryOne(Connection* connection, const char* query);
+    const Result<PostgresQueryResult> query(Connection* connection, const char* query);
+    const Result<PostgresRow> queryOne(Connection* connection, const char* query);
 
 }
