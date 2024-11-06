@@ -24,7 +24,7 @@ extension Connection {
         let queryResult = result.getValue()
 
         let columns = queryResult.columns.enumerated().map { idx, column in
-            let type = metaInfo.oidToType(column.type) ?? .init(name: "UKNOWN", category: .unknown)
+            let type = metaInfo.oidToType(column.type) ?? .init(name: "UNKNOWN", category: .unknown)
             return PostgresColumn(
                 id: idx,
                 name: .init(column.name),
