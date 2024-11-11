@@ -12,7 +12,7 @@ let package = Package(
         .library(name: "PostgresKit", targets: ["PostgresKit"]),
     ],
     dependencies: [
-        .package(name: "SqlAdapterKit", path: "../SqlAdapterKit")
+        .package(name: "SqlAdapterKit", path: "git@github.com:Beaxhem/PostgresKit.git")
     ],
     targets: [
         .systemLibrary(
