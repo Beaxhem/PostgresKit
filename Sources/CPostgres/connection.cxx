@@ -5,7 +5,7 @@
 //  Created by Illia Senchukov on 23.08.2024.
 //
 
-#include <connection.hxx>
+#include "connection.hxx"
 #include <pqxx/pqxx>
 
 const Result<pqxx::connection*> newConnection(const char* connectionString) {

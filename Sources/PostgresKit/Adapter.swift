@@ -8,8 +8,8 @@
 import Foundation
 @preconcurrency import CPostgres
 import SqlAdapterKit
-@preconcurrency import Clibpq
-@preconcurrency import Clibpqxx
+//@preconcurrency import Clibpq
+//@preconcurrency import Clibpqxx
 
 public struct PostgresConfiguration: Configuration, Sendable {
 

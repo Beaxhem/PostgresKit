@@ -9,37 +9,23 @@ let package = Package(
         .macOS(.v14)
     ],
     products: [
-        .library(name: "PostgresKit", targets: ["PostgresKit"]),
+        .library(name: "PostgresKit", targets: ["PostgresKit"])
     ],
     dependencies: [
         .package(name: "SqlAdapterKit", path: "../SqlAdapterKit")
     ],
     targets: [
-        .systemLibrary(
-            name: "Clibpq",
-            pkgConfig: "libpq",
-            providers: [
-                .brewItem(["libpq"]),
-                .aptItem(["libpq-dev"])
-            ]
-        ),
-        .systemLibrary(
-            name: "Clibpqxx",
-            pkgConfig: "libpqxx",
-            providers: [
-                .brewItem(["libpqxx"]),
-            ]
-        ),
+        .binaryTarget(name: "libpqxx", path: "./Frameworks/libpqxx.xcframework"),
         .target(
             name: "CPostgres",
-            dependencies: ["Clibpqxx", "Clibpq"],
+            dependencies: ["libpqxx"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
             ]
         ),
         .target(
             name: "PostgresKit",
-            dependencies: ["Clibpq", "Clibpqxx", "CPostgres", "SqlAdapterKit"],
+            dependencies: ["libpqxx", "CPostgres", "SqlAdapterKit"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx)
             ]

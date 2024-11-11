@@ -1,4 +1,0 @@
-module Clibpqxx [system] {
-  link "pqxx"
-  export *
-}

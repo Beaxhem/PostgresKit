@@ -10,8 +10,9 @@
 #include <vector>
 #include <iostream>
 #include <pqxx/pqxx>
-#include <connection.hxx>
-#include <result.hxx>
+
+#include "result.hxx"
+#include "connection.hxx"
 
 namespace postgres {
 

@@ -8,7 +8,8 @@
 #pragma once
 
 #include <iostream>
-#include <result.hxx>
 #include <pqxx/pqxx>
+
+#include "result.hxx"
 
 const Result<pqxx::connection*> newConnection(const char* connectionString);
