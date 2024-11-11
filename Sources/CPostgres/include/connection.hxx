@@ -9,27 +9,6 @@
 
 #include <iostream>
 #include <result.hxx>
-#include <swift/bridging>
+#include <pqxx/pqxx>
 
-class Connection {
-public:
-    void* connection;
-    size_t count = 0;
-
-    Connection(void* connection);
-    Connection(const Connection &) = delete;
-    ~Connection();
-} SWIFT_SHARED_REFERENCE(retainConnection, releaseConnection);
-
-inline void retainConnection(Connection* connection) {
-    connection->count++;
-}
-
-inline void releaseConnection(Connection* connection) {
-    connection->count--;
-    if (connection->count == 0) {
-        delete connection;
-    }
-}
-
-const Result<Connection*> newConnection(const char* connectionString);
+const Result<pqxx::connection*> newConnection(const char* connectionString);

@@ -8,6 +8,8 @@
 import Foundation
 @preconcurrency import CPostgres
 import SqlAdapterKit
+@preconcurrency import Clibpq
+@preconcurrency import Clibpqxx
 
 public struct PostgresConfiguration: Configuration, Sendable {
 
@@ -65,7 +67,7 @@ public final actor PostgresAdapter: SqlAdapter, Sendable {
             throw .init(message: "Internal error")
         }
 
-        return await .init(connection: connection)
+        return await .init(connection: .init(connection: connection))
     }
 
 }

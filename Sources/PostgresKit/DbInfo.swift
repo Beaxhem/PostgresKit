@@ -26,7 +26,7 @@ public final class DbInfo: @unchecked Sendable {
 
 }
 
-public extension DbInfo {
+extension DbInfo {
 
     func reload(connection: Connection) async {
         do {

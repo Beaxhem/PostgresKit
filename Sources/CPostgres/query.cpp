@@ -11,14 +11,9 @@
 
 namespace postgres {
 
-    pqxx::connection* getConnection(Connection* connection) {
-        return static_cast<pqxx::connection*>(connection->connection);
-    }
-
-    const Result<PostgresQueryResult> query(Connection* connection, const char* query) SWIFT_RETURNS_INDEPENDENT_VALUE {
+    const Result<PostgresQueryResult> query(pqxx::connection* connection, const char* query) SWIFT_RETURNS_INDEPENDENT_VALUE {
         try {
-            pqxx::connection* c = getConnection(connection);
-            pqxx::nontransaction w(*c);
+            pqxx::nontransaction w(*connection);
 
             pqxx::result result = w.exec(query);
 
@@ -57,10 +52,9 @@ namespace postgres {
         }
     }
 
-    const Result<PostgresRow> queryOne(Connection* connection, const char* query) SWIFT_RETURNS_INDEPENDENT_VALUE {
+    const Result<PostgresRow> queryOne(pqxx::connection* connection, const char* query) SWIFT_RETURNS_INDEPENDENT_VALUE {
         try {
-            pqxx::connection* c = getConnection(connection);
-            pqxx::work w(*c);
+            pqxx::work w(*connection);
 
             pqxx::row result = w.exec1(query);
             PostgresRow row = {};

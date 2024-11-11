@@ -9,12 +9,30 @@ import Foundation
 import CPostgres
 import SqlAdapterKit
 
+final class Connection: @unchecked Sendable {
+
+    private let connection: UnsafeMutablePointer<pqxx.connection>
+
+    init(connection: UnsafeMutablePointer<pqxx.connection>) {
+        self.connection = connection
+    }
+
+    deinit {
+        connection.pointee.close()
+        connection.deallocate()
+    }
+
+}
+
 extension Connection {
 
     func query(_ query: String, metaInfo: DbInfo) throws(QueryError) -> SqlAdapterKit.QueryResult {
         let result = query.withCString { pointer in
-            CPostgres.postgres.query(self, pointer)
+            CPostgres.postgres.query(connection, pointer)
         }
+
+        try checkCancellation()
+
         guard result.isSuccess() else {
             let error = result.getError()
             throw .init(message: String(error.message))
@@ -38,11 +56,12 @@ extension Connection {
             defer { id += 1}
 
             return SqlAdapterKit.GenericRow(id: id,
-                                     data: $0.map {
+                                            data: $0.map {
                 SqlAdapterKit.GenericField(value: $0.isNull ? nil : String($0.value))
             })
         }
 
+        try checkCancellation()
         print("Mapping took \(CFAbsoluteTimeGetCurrent() - mapStart) seconds")
         return .init(columns: columns, rows: rows)
     }

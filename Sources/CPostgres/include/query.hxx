@@ -38,7 +38,7 @@ namespace postgres {
     };
 
 
-    const Result<PostgresQueryResult> query(Connection* connection, const char* query);
-    const Result<PostgresRow> queryOne(Connection* connection, const char* query);
+    const Result<PostgresQueryResult> query(pqxx::connection* connection, const char* query);
+    const Result<PostgresRow> queryOne(pqxx::connection* connection, const char* query);
 
 }

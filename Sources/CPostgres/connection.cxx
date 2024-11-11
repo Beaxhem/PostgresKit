@@ -8,23 +8,13 @@
 #include <connection.hxx>
 #include <pqxx/pqxx>
 
-Connection::Connection(void* connection) {
-    this->connection = connection;
-}
-
-const Result<Connection*> newConnection(const char* connectionString) {
+const Result<pqxx::connection*> newConnection(const char* connectionString) {
     try {
-        auto connection = new Connection(static_cast<void*>(new pqxx::connection(connectionString)));
-        return Result<Connection*>(connection);
+        auto connection = new pqxx::connection(connectionString);
+        return Result<pqxx::connection*>(connection);
     } catch (std::exception& ex) {
-        return Result<Connection*>(Error(ex));
+        return Result<pqxx::connection*>(Error(ex));
     } catch (...) {
-        return Result<Connection*>(Error("Unknown error"));
+        return Result<pqxx::connection*>(Error("Unknown error"));
     }
-}
-
-Connection::~Connection() {
-    auto pqxx_connection = static_cast<pqxx::connection*>(connection);
-    pqxx_connection->close();
-    delete pqxx_connection;
 }
