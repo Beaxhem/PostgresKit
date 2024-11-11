@@ -56,7 +56,7 @@ namespace postgres {
         try {
             pqxx::work w(*connection);
 
-            pqxx::row result = w.exec1(query);
+            pqxx::row result = w.exec(query).one_row();
             PostgresRow row = {};
 
             for (int column = 0; column < result.size(); column ++) {
