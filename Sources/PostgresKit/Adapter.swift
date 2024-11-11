@@ -78,6 +78,10 @@ public extension PostgresAdapter {
         try connection.query(query, metaInfo: metaInfo)
     }
 
+    nonisolated func cancelQuery() {
+        connection.cancelQuery()
+    }
+
     func table(for column: any SqlAdapterKit.Column) -> (any SqlTable)? {
         guard let column = column as? PostgresColumn else {
             return nil

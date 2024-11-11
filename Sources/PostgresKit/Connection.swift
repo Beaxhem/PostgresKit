@@ -31,8 +31,6 @@ extension Connection {
             CPostgres.postgres.query(connection, pointer)
         }
 
-        try checkCancellation()
-
         guard result.isSuccess() else {
             let error = result.getError()
             throw .init(message: String(error.message))
@@ -61,9 +59,12 @@ extension Connection {
             })
         }
 
-        try checkCancellation()
         print("Mapping took \(CFAbsoluteTimeGetCurrent() - mapStart) seconds")
         return .init(columns: columns, rows: rows)
+    }
+
+    func cancelQuery() {
+        connection.pointee.cancel_query()
     }
 
 }
