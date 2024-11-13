@@ -92,12 +92,12 @@ public extension PostgresAdapter {
         metaInfo.tables
     }
 
-    func primaryKeys(for table: any SqlTable) -> Set<String>? {
+    func primaryKeys(for table: any SqlTable) -> Set<String> {
         guard let table = table as? PostgresTable else {
             return []
         }
 
-        return metaInfo.oidToPrimaryKeys(table.oid)
+        return metaInfo.oidToPrimaryKeys(table.oid) ?? []
     }
 
 }
