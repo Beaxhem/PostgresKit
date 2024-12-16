@@ -49,14 +49,20 @@ extension Connection {
             )
         }
 
-        var id = 0
-        let rows = queryResult.rows.map {
-            defer { id += 1}
+        var rows: [GenericRow] = []
+        rows.reserveCapacity(queryResult.rows.count)
 
-            return SqlAdapterKit.GenericRow(id: id,
-                                            data: $0.map {
-                SqlAdapterKit.GenericField(value: $0.isNull ? nil : String($0.value))
-            })
+        for i in (queryResult.rows.startIndex..<queryResult.rows.endIndex) {
+            let row = queryResult.rows[i]
+
+            var data: [GenericField] = []
+            data.reserveCapacity(row.count)
+
+            for f in row.startIndex..<row.endIndex {
+                data.append(.init(value: row[f].isNull ? nil : String(row[f].value)))
+            }
+
+            rows.append(.init(id: i, data: consume data))
         }
 
         print("Mapping took \(CFAbsoluteTimeGetCurrent() - mapStart) seconds")
