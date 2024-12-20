@@ -9,7 +9,7 @@ import Foundation
 @preconcurrency import CPostgres
 import SqlAdapterKit
 
-public struct PostgresConfiguration: Configuration, Sendable {
+public struct PostgresConfiguration: Sendable {
 
     public var username: String
     public var password: String
@@ -31,14 +31,6 @@ public struct PostgresConfiguration: Configuration, Sendable {
 
 }
 
-extension PostgresConfiguration: DatabaseConnectionConfig {
-
-    public consuming func withDatabase(_ database: String?) -> PostgresConfiguration {
-        .init(username: username, password: password, host: host, port: port, database: database)
-    }
-
-}
-
 public final actor PostgresAdapter: SqlAdapter, Sendable {
 
     private let connection: Connection
@@ -52,7 +44,7 @@ public final actor PostgresAdapter: SqlAdapter, Sendable {
         await metaInfo.reload(connection: connection)
     }
 
-    public static func connect(configuration: SqlAdapterKit.Configuration) async throws(QueryError) -> PostgresAdapter {
+    public static func connect(configuration: PostgresConfiguration) async throws(QueryError) -> PostgresAdapter {
         let result = configuration.connectionString.withCString { pointer in
             CPostgres.newConnection(pointer)
         }
