@@ -81,7 +81,33 @@ public extension PostgresAdapter {
     }
 
     func fetchTables() throws(QueryError) -> [any SqlTable] {
-        metaInfo.tables
+        let sqlQuery = """
+with tables as (
+    SELECT table_schema, table_name
+    FROM information_schema.tables
+    WHERE table_type = 'BASE TABLE' AND table_schema NOT IN ('pg_catalog', 'information_schema')
+)
+SELECT
+    table_schema, table_name,
+    CONCAT('"', table_schema, '"."', table_name, '"')::regclass::oid as oid
+FROM tables
+"""
+        let result = try connection.query(sqlQuery, metaInfo: metaInfo)
+        
+        let tables: [PostgresTable] = result.rows.compactMap { row in
+            guard row.data.count == 3,
+                  let schema = row.data[0].value,
+                  let name = row.data[1].value,
+                  let oidString = row.data[2].value else {
+                return nil
+            }
+            let oid = OId(oidString) ?? 0
+
+            return PostgresTable(tableSchema: schema, name: name, oid: oid)
+        }
+
+        metaInfo.tables = tables
+        return tables
     }
 
     func primaryKeys(for table: any SqlTable) -> Set<String> {

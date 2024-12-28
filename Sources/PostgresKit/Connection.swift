@@ -18,6 +18,12 @@ final class Connection: @unchecked Sendable {
     }
 
     deinit {
+        connection.pointee.cancel_query()
+        connection.pointee.close()
+        connection.deallocate()
+    }
+
+    func close() {
         connection.pointee.close()
         connection.deallocate()
     }

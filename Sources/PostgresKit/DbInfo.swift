@@ -15,7 +15,7 @@ public final class DbInfo: @unchecked Sendable {
     private var _oidToTable: [OId: Int] = [:]
     private var _tableToPrimaryKeyNames: [OId: Set<String>] = [:]
 
-    private(set) var tables: [PostgresTable] = [] {
+    var tables: [PostgresTable] = [] {
         didSet {
             _oidToTable = tables.enumerated().reduce(into: [:]) { (partialResult, arg1) in
                 let (idx, table) = arg1
@@ -31,7 +31,6 @@ extension DbInfo {
     func reload(connection: Connection) async {
         do {
             self._oidToType = try fetchTypes(connection: connection)
-            self.tables = try fetchTables(connection: connection)
             self._tableToPrimaryKeyNames = try fetchPrimaryKeys(connection: connection)
         } catch {
             print("Couldn't collect db info: \(error.message)")
@@ -82,32 +81,6 @@ private extension DbInfo {
         }
 
         return typesInfo
-    }
-
-    func fetchTables(connection: Connection) throws (QueryError) -> [PostgresTable] {
-        let sqlQuery = """
-with tables as (
-    SELECT table_schema, table_name
-    FROM information_schema.tables
-    WHERE table_type = 'BASE TABLE' AND table_schema NOT IN ('pg_catalog', 'information_schema')
-)
-SELECT
-    table_schema, table_name,
-    CONCAT('"', table_schema, '"."', table_name, '"')::regclass::oid as oid
-FROM tables
-"""
-        let result = try connection.query(sqlQuery, metaInfo: self)
-        return result.rows.compactMap { row in
-            guard row.data.count == 3,
-                  let schema = row.data[0].value,
-                  let name = row.data[1].value,
-                  let oidString = row.data[2].value else {
-                return nil
-            }
-            let oid = OId(oidString) ?? 0
-
-            return PostgresTable(tableSchema: schema, name: name, oid: oid)
-        }
     }
 
     func fetchPrimaryKeys(connection: Connection) throws(QueryError) -> [OId: Set<String>] {
