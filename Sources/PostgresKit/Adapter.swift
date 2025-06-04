@@ -8,6 +8,7 @@
 import Foundation
 @preconcurrency import CPostgres
 import SqlAdapterKit
+import ConnectionPool
 
 public struct PostgresConfiguration: Sendable {
 
@@ -31,20 +32,11 @@ public struct PostgresConfiguration: Sendable {
 
 }
 
-public final actor PostgresAdapter: SqlAdapter, Sendable {
+struct PostgresConnectionFactory: ConnectionFactory {
 
-    private let connection: Connection
+    let configuration: PostgresConfiguration
 
-    private let metaInfo: DbInfo
-
-    init(connection: Connection) async {
-        self.connection = connection
-        self.metaInfo = .init()
-
-        await metaInfo.reload(connection: connection)
-    }
-
-    public static func connect(configuration: PostgresConfiguration) async throws(QueryError) -> PostgresAdapter {
+    func connect() throws(QueryError) -> PostgresKit.Connection {
         let result = configuration.connectionString.withCString { pointer in
             CPostgres.newConnection(pointer)
         }
@@ -57,19 +49,37 @@ public final actor PostgresAdapter: SqlAdapter, Sendable {
             throw .init(message: "Internal error")
         }
 
-        return await .init(connection: .init(connection: connection))
+        return .init(connection: connection)
+    }
+
+}
+
+public final actor PostgresAdapter: SqlAdapter, Sendable {
+
+    private let pool: ConnectionPool<PostgresConnectionFactory>
+
+    private let metaInfo = DbInfo()
+
+    public init(configuration: PostgresConfiguration) async throws(QueryError) {
+        self.pool = try await .init(factory: .init(configuration: configuration))
+
+        try await pool.withConnection { (connection: Connection) throws(QueryError) in
+            await metaInfo.reload(connection: connection)
+        }
     }
 
 }
 
 public extension PostgresAdapter {
 
-    func query(_ query: String) throws(QueryError) -> SqlAdapterKit.QueryResult {
-        try connection.query(query, metaInfo: metaInfo)
+    func query(_ query: String) async throws(QueryError) -> SqlAdapterKit.QueryResult {
+        try await pool.withConnection { (connection) throws(QueryError) in
+            try connection.query(query, metaInfo: metaInfo)
+        }
     }
 
     nonisolated func cancelQuery() {
-        connection.cancelQuery()
+//        connection.cancelQuery()
     }
 
     func table(for column: any SqlAdapterKit.Column) -> (any SqlTable)? {
@@ -80,7 +90,7 @@ public extension PostgresAdapter {
         return metaInfo.oidToTable(column.tableOid)
     }
 
-    func fetchTables() throws(QueryError) -> [any SqlTable] {
+    func fetchTables() async throws(QueryError) -> [any SqlTable] {
         let sqlQuery = """
 with tables as (
     SELECT table_schema, table_name
@@ -92,7 +102,9 @@ SELECT
     CONCAT('"', table_schema, '"."', table_name, '"')::regclass::oid as oid
 FROM tables
 """
-        let result = try connection.query(sqlQuery, metaInfo: metaInfo)
+        let result = try await pool.withConnection { (connection) throws(QueryError) in
+            try connection.query(sqlQuery, metaInfo: metaInfo)
+        }
         
         let tables: [PostgresTable] = result.rows.compactMap { row in
             guard row.data.count == 3,
@@ -123,7 +135,9 @@ FROM tables
 extension PostgresAdapter: MetaInfoProvidingAdapter {
 
     public func reloadMetaInfo() async throws(QueryError) {
-        await metaInfo.reload(connection: connection)
+        try await pool.withConnection { (connection) throws(QueryError) in
+            await metaInfo.reload(connection: connection)
+        }
     }
 
 }
