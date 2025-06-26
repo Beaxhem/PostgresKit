@@ -16,17 +16,16 @@ let package = Package(
     ],
     targets: [
         .binaryTarget(name: "libpq", path: "./Frameworks/libpq.xcframework"),
-        .binaryTarget(name: "libpqxx", path: "./Frameworks/libpqxx.xcframework"),
         .target(
             name: "CPostgres",
-            dependencies: ["libpq", "libpqxx"],
+            dependencies: ["libpq"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
             ]
         ),
         .target(
             name: "PostgresKit",
-            dependencies: ["libpq", "libpqxx", "CPostgres", "SqlAdapterKit"],
+            dependencies: ["libpq", "CPostgres", "SqlAdapterKit"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx)
             ]
