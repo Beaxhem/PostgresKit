@@ -37,19 +37,14 @@ struct PostgresConnectionFactory: ConnectionFactory {
     let configuration: PostgresConfiguration
 
     func connect() throws(QueryError) -> PostgresKit.Connection {
-        let result = configuration.connectionString.withCString { pointer in
-            CPostgres.newConnection(pointer)
-        }
-        guard !result.hasError() else {
-            let error = result.getError()
-            throw .init(message: String(error.message))
+        let connection = PQconnectdb(configuration.connectionString)
+        if PQstatus(connection) != CONNECTION_OK {
+            defer { PQfinish(connection)}
+
+            throw .init(message: String(cString: PQerrorMessage(connection)))
         }
 
-        guard let connection = result.getValue() else {
-            throw .init(message: "Internal error")
-        }
-
-        return .init(connection: connection)
+        return .init(connection: connection!)
     }
 
 }

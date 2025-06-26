@@ -1,5 +1,5 @@
 module CPostgres {
     header "query.hxx"
-    header "result.hxx"
+//    header "result.hxx"
     export *
 }

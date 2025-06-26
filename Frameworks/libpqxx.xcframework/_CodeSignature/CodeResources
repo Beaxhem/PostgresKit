@@ -4,6 +4,10 @@
 <dict>
 	<key>files</key>
 	<dict>
+		<key>.DS_Store</key>
+		<data>
+		/MFzUsE0RH4zPQokOWMOdNmMMi4=
+		</data>
 		<key>macos-arm64_x86_64/Headers/pqxx/array</key>
 		<data>
 		pKsYiRLrfK3d2HWKh3XkUCeQrSU=

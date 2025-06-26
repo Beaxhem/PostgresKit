@@ -11,72 +11,97 @@ import SqlAdapterKit
 
 final class Connection: @unchecked Sendable {
 
-    private let connection: UnsafeMutablePointer<pqxx.connection>
+    private let connection: OpaquePointer
 
-    init(connection: UnsafeMutablePointer<pqxx.connection>) {
+    init(connection: OpaquePointer) {
         self.connection = connection
     }
 
     deinit {
-        connection.pointee.cancel_query()
-        connection.pointee.close()
-        connection.deallocate()
-    }
-
-    func close() {
-        connection.pointee.close()
-        connection.deallocate()
+        cancelQuery()
+        PQfinish(connection)
     }
 
 }
 
 extension Connection {
 
-    func query(_ query: String, metaInfo: DbInfo) throws(QueryError) -> SqlAdapterKit.QueryResult {
-        let result = query.withCString { pointer in
-            CPostgres.postgres.query(connection, pointer)
+    func query(_ query: String, metaInfo: DbInfo) throws(QueryError) -> QueryResult {
+        let start = CFAbsoluteTimeGetCurrent()
+
+        let result = PQexec(connection, query)
+        if (PQresultStatus(result) != PGRES_TUPLES_OK) {
+            throw .init(message: String(cString: PQerrorMessage(connection)))
         }
 
-        guard result.isSuccess() else {
-            let error = result.getError()
-            throw .init(message: String(error.message))
-        }
+        let rowsCount = PQntuples(result)
+        let columnsCount = PQnfields(result)
 
-        let mapStart = CFAbsoluteTimeGetCurrent()
-        let queryResult = result.getValue()
+        var columns: [PostgresColumn] = []
+        columns.reserveCapacity(Int(columnsCount))
 
-        let columns = queryResult.columns.enumerated().map { idx, column in
-            let type = metaInfo.oidToType(column.type) ?? .init(name: "UNKNOWN", category: .unknown)
-            return PostgresColumn(
-                id: idx,
-                name: .init(column.name),
-                tableOid: column.table,
-                type: type.genericType
+        for column in (0..<columnsCount) {
+            let tableOid = PQftable(result, column)
+            let typeOid = PQftype(result, column)
+
+            let type = metaInfo.oidToType(typeOid) ?? .init(name: "#UNKNOWN", category: .unknown)
+
+            columns.append(
+                .init(
+                    id: Int(column),
+                    name: String(cString: PQfname(result, column)),
+                    tableOid: tableOid,
+                    type: type.genericType
+                )
             )
         }
 
         var rows: [GenericRow] = []
-        rows.reserveCapacity(queryResult.rows.count)
+        rows.reserveCapacity(Int(rowsCount))
 
-        for i in (queryResult.rows.startIndex..<queryResult.rows.endIndex) {
-            let row = queryResult.rows[i]
+        for rowIdx in (0..<rowsCount) {
+            var fields: [GenericField] = []
+            fields.reserveCapacity(Int(columnsCount))
 
-            var data: [GenericField] = []
-            data.reserveCapacity(row.count)
+            for columnIdx in (0..<columnsCount) {
+                if let value = PQgetvalue(result, rowIdx, columnIdx) {
+                    let length = PQgetlength(result, rowIdx, columnIdx)
+                    let value = NSString(bytes: value, length: Int(length), encoding: String.Encoding.utf8.rawValue) as? String
 
-            for f in row.startIndex..<row.endIndex {
-                data.append(.init(value: row[f].isNull ? nil : String(row[f].value)))
+                    fields.append(.init(value: value))
+                } else {
+                    fields.append(.init(value: nil))
+                }
             }
 
-            rows.append(.init(id: i, data: consume data))
+            rows.append(.init(id: Int(rowIdx), data: fields))
         }
 
-        print("Mapping took \(CFAbsoluteTimeGetCurrent() - mapStart) seconds")
-        return .init(columns: columns, rows: rows)
+        PQclear(result)
+
+        let info = ExecutionInfo(duration: CFAbsoluteTimeGetCurrent() - start)
+
+        return .init(columns: columns, rows: rows, executionInfo: info)
     }
 
     func cancelQuery() {
-        connection.pointee.cancel_query()
+        guard let cancel = PQgetCancel(connection) else {
+            print("Failed to get cancel object", String(cString: PQerrorMessage(connection)))
+            return
+        }
+
+        let bufferSize = 256
+        let errbuf = UnsafeMutablePointer<CChar>.allocate(capacity: bufferSize)
+        defer { errbuf.deallocate() }
+
+        let success = PQcancel(cancel, errbuf, Int32(bufferSize)) != 0
+
+        if success {
+            print("Query cancel request sent successfully.")
+        } else {
+            let errorMessage = String(cString: errbuf)
+            print("Failed to send cancel request: \(errorMessage)")
+        }
     }
 
 }
