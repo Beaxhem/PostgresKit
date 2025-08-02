@@ -81,8 +81,6 @@ extension PostgresConnection {
 
         PQclear(result)
 
-        print(Task.isCancelled)
-
         let info = ExecutionInfo(duration: CFAbsoluteTimeGetCurrent() - start)
 
         return .init(columns: columns, rows: rows, executionInfo: info)
