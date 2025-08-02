@@ -31,7 +31,13 @@ extension PostgresConnection {
         let start = CFAbsoluteTimeGetCurrent()
 
         let result = PQexec(connection, query)
-        if (PQresultStatus(result) != PGRES_TUPLES_OK) {
+
+        switch PQresultStatus(result) {
+        case PGRES_COMMAND_OK:
+            return .empty
+        case PGRES_TUPLES_OK:
+            break
+        default:
             throw QueryError(message: String(cString: PQerrorMessage(connection)))
         }
 
