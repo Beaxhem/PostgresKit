@@ -36,7 +36,7 @@ struct PostgresConnectionFactory: ConnectionFactory {
 
     let configuration: PostgresConfiguration
 
-    func connect() throws(QueryError) -> PostgresKit.Connection {
+    func connect() throws(QueryError) -> PostgresConnection {
         let connection = PQconnectdb(configuration.connectionString)
         if PQstatus(connection) != CONNECTION_OK {
             defer { PQfinish(connection)}
@@ -58,8 +58,8 @@ public final actor PostgresAdapter: SqlAdapter, Sendable {
     public init(configuration: PostgresConfiguration) async throws(QueryError) {
         self.pool = try await .init(factory: .init(configuration: configuration))
 
-        try await pool.withConnection { (connection: Connection) throws(QueryError) in
-            await metaInfo.reload(connection: connection)
+        try await pool.withConnection { (connection: PostgresConnection) throws(QueryError) in
+            try await metaInfo.reload(connection: connection)
         }
     }
 
@@ -68,70 +68,14 @@ public final actor PostgresAdapter: SqlAdapter, Sendable {
 public extension PostgresAdapter {
 
     func query(_ query: String) async throws(QueryError) -> SqlAdapterKit.QueryResult {
-        try await pool.withConnection { (connection) throws(QueryError) in
-            try connection.query(query, metaInfo: metaInfo)
-        }
-    }
-
-    nonisolated func cancelQuery() {
-//        connection.cancelQuery()
-    }
-
-    func table(for column: any SqlAdapterKit.Column) -> (any SqlTable)? {
-        guard let column = column as? PostgresColumn else {
-            return nil
-        }
-
-        return metaInfo.oidToTable(column.tableOid)
-    }
-
-    func fetchTables() async throws(QueryError) -> [any SqlTable] {
-        let sqlQuery = """
-with tables as (
-    SELECT table_schema, table_name
-    FROM information_schema.tables
-    WHERE table_type = 'BASE TABLE' AND table_schema NOT IN ('pg_catalog', 'information_schema')
-)
-SELECT
-    table_schema, table_name,
-    CONCAT('"', table_schema, '"."', table_name, '"')::regclass::oid as oid
-FROM tables
-"""
-        let result = try await pool.withConnection { (connection) throws(QueryError) in
-            try connection.query(sqlQuery, metaInfo: metaInfo)
-        }
-        
-        let tables: [PostgresTable] = result.rows.compactMap { row in
-            guard row.data.count == 3,
-                  let schema = row.data[0].value,
-                  let name = row.data[1].value,
-                  let oidString = row.data[2].value else {
-                return nil
+        try await pool.withCancellableConnection { (connection) throws(QueryError) in
+            do {
+                return try await connection.query(query, metaInfo: metaInfo)
+            } catch (let error as QueryError) {
+                throw error
+            } catch {
+                throw .cancelled
             }
-            let oid = OId(oidString) ?? 0
-
-            return PostgresTable(tableSchema: schema, name: name, oid: oid)
-        }
-
-        metaInfo.tables = tables
-        return tables
-    }
-
-    func primaryKeys(for table: any SqlTable) -> Set<String> {
-        guard let table = table as? PostgresTable else {
-            return []
-        }
-
-        return metaInfo.oidToPrimaryKeys(table.oid) ?? []
-    }
-
-}
-
-extension PostgresAdapter: MetaInfoProvidingAdapter {
-
-    public func reloadMetaInfo() async throws(QueryError) {
-        try await pool.withConnection { (connection) throws(QueryError) in
-            await metaInfo.reload(connection: connection)
         }
     }
 

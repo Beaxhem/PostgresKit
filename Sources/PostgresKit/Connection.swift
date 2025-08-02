@@ -8,8 +8,9 @@
 import Foundation
 import CPostgres
 import SqlAdapterKit
+import ConnectionPool
 
-final class Connection: @unchecked Sendable {
+final class PostgresConnection: CancellableConnection, @unchecked Sendable {
 
     private let connection: OpaquePointer
 
@@ -24,14 +25,14 @@ final class Connection: @unchecked Sendable {
 
 }
 
-extension Connection {
+extension PostgresConnection {
 
-    func query(_ query: String, metaInfo: DbInfo) throws(QueryError) -> QueryResult {
+    func query(_ query: String, metaInfo: DbInfo) async throws -> QueryResult {
         let start = CFAbsoluteTimeGetCurrent()
 
         let result = PQexec(connection, query)
         if (PQresultStatus(result) != PGRES_TUPLES_OK) {
-            throw .init(message: String(cString: PQerrorMessage(connection)))
+            throw QueryError(message: String(cString: PQerrorMessage(connection)))
         }
 
         let rowsCount = PQntuples(result)
@@ -44,7 +45,7 @@ extension Connection {
             let tableOid = PQftable(result, column)
             let typeOid = PQftype(result, column)
 
-            let type = metaInfo.oidToType(typeOid) ?? .init(name: "#UNKNOWN", category: .unknown)
+            let type = metaInfo.oidToType[typeOid] ?? .init(name: "#UNKNOWN", category: .unknown)
 
             columns.append(
                 .init(
@@ -60,6 +61,7 @@ extension Connection {
         rows.reserveCapacity(Int(rowsCount))
 
         for rowIdx in (0..<rowsCount) {
+            try Task.checkCancellation()
             var fields: [GenericField] = []
             fields.reserveCapacity(Int(columnsCount))
 
@@ -79,12 +81,15 @@ extension Connection {
 
         PQclear(result)
 
+        print(Task.isCancelled)
+
         let info = ExecutionInfo(duration: CFAbsoluteTimeGetCurrent() - start)
 
         return .init(columns: columns, rows: rows, executionInfo: info)
     }
 
     func cancelQuery() {
+        print("POSTGRES: trying to cancel query")
         guard let cancel = PQgetCancel(connection) else {
             print("Failed to get cancel object", String(cString: PQerrorMessage(connection)))
             return

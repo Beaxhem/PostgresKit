@@ -15,42 +15,13 @@ public struct PostgresColumn: SqlAdapterKit.Column {
     public let id: Int
     public let name: String
     public let type: GenericType
-
-    let tableOid: OId
+    public let tableOid: OId
 
     init(id: Int, name: String, tableOid: OId, type: GenericType) {
         self.id = id
         self.name = name
         self.tableOid = tableOid
         self.type = type
-    }
-
-}
-
-public final class PostgresTable: SqlTable {
-
-    public var id: Int {
-        .init(oid)
-    }
-
-    public var queryName: String {
-        "\"\(tableSchema)\".\"\(name)\""
-    }
-
-    public var displayName: String {
-        name
-    }
-
-    public let tableSchema: String
-
-    let name: String
-
-    public let oid: OId
-
-    public init(tableSchema: String, name: String, oid: OId) {
-        self.tableSchema = tableSchema
-        self.name = name
-        self.oid = oid
     }
 
 }
