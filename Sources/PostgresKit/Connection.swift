@@ -31,6 +31,7 @@ extension PostgresConnection {
         let start = CFAbsoluteTimeGetCurrent()
 
         let result = PQexec(connection, query)
+        defer { PQclear(result) }
 
         switch PQresultStatus(result) {
         case PGRES_COMMAND_OK:
@@ -85,8 +86,6 @@ extension PostgresConnection {
             rows.append(.init(id: Int(rowIdx), data: fields))
         }
 
-        PQclear(result)
-
         let info = ExecutionInfo(duration: CFAbsoluteTimeGetCurrent() - start)
 
         return .init(columns: columns, rows: rows, executionInfo: info)
@@ -98,6 +97,8 @@ extension PostgresConnection {
             print("Failed to get cancel object", String(cString: PQerrorMessage(connection)))
             return
         }
+
+        defer { PQfreeCancel(cancel) }
 
         let bufferSize = 256
         let errbuf = UnsafeMutablePointer<CChar>.allocate(capacity: bufferSize)
