@@ -19,7 +19,6 @@ final class PostgresConnection: CancellableConnection, @unchecked Sendable {
     }
 
     deinit {
-        cancelQuery()
         PQfinish(connection)
     }
 
@@ -91,7 +90,7 @@ extension PostgresConnection {
         return .init(columns: columns, rows: rows, executionInfo: info)
     }
 
-    func cancelQuery() {
+    func cancelQuery<Factory, Pool>(pool: Pool) async throws(QueryError) where PostgresConnection == Factory.C, Factory : ConnectionFactory, Pool : ConnectionPool<Factory> {
         print("POSTGRES: trying to cancel query")
         guard let cancel = PQgetCancel(connection) else {
             print("Failed to get cancel object", String(cString: PQerrorMessage(connection)))
