@@ -57,7 +57,6 @@ extension PostgresConnection {
         // so the arena can't be pre-sized; it grows by amortised doubling instead.
         var builder = QueryResultArenaBuilder()
         var columns: [PostgresColumn]?
-        var rowID = 0
         var pendingError: String?
 
         // A streamed query owns the connection until `PQgetResult` returns nil.
@@ -100,8 +99,7 @@ extension PostgresConnection {
                         builder.appendValue(cell, length: length)
                     }
 
-                    builder.finishRow(id: rowID)
-                    rowID += 1
+                    builder.finishRow()
                 }
 
                 // `PGRES_TUPLES_OK` terminates the current statement's result set.
@@ -109,7 +107,6 @@ extension PostgresConnection {
                     latest = (statementColumns, builder)
                     builder = QueryResultArenaBuilder()
                     columns = nil
-                    rowID = 0
                 }
             case PGRES_COMMAND_OK, PGRES_EMPTY_QUERY:
                 // A statement with no result set (INSERT/UPDATE/DDL, or empty). It
@@ -118,7 +115,6 @@ extension PostgresConnection {
                 latest = nil
                 builder = QueryResultArenaBuilder()
                 columns = nil
-                rowID = 0
             default:
                 // Latch the first error, then keep looping so the connection is
                 // fully drained before we surface it.
@@ -138,10 +134,10 @@ extension PostgresConnection {
             return .empty
         }
 
-        let rows = latest.builder.makeRows()
+        let store = latest.builder.makeStore()
         let info = ExecutionInfo(duration: CFAbsoluteTimeGetCurrent() - start)
 
-        return .init(columns: latest.columns, rows: rows, executionInfo: info)
+        return .init(columns: latest.columns, store: store, executionInfo: info)
     }
 
     /// Build the column descriptors from any result that carries field metadata
