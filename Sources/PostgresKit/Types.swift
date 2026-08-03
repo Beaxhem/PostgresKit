@@ -17,6 +17,12 @@ public struct PostgresColumn: SqlAdapterKit.Column {
     public let type: GenericType
     public let tableOid: OId
 
+    /// Postgres reports oid 0 for columns that aren't a plain table reference
+    /// (expressions, literals, function results) — those have no owner.
+    public var owner: TableKey? {
+        tableOid == 0 ? nil : .oid(tableOid)
+    }
+
     init(id: Int, name: String, tableOid: OId, type: GenericType) {
         self.id = id
         self.name = name

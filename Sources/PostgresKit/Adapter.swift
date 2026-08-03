@@ -6,7 +6,7 @@
 //
 
 import Foundation
-@preconcurrency import CPostgres
+import CPostgres
 import SqlAdapterKit
 import ConnectionPool
 
