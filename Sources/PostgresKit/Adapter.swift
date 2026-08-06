@@ -68,9 +68,27 @@ public final actor PostgresAdapter: SqlAdapter, Sendable {
 public extension PostgresAdapter {
 
     func query(_ query: String) async throws(QueryError) -> SqlAdapterKit.QueryResult {
+        try await run(query, onPartial: nil)
+    }
+
+    func query(
+        _ query: String,
+        onPartial: @escaping @Sendable (SqlAdapterKit.QueryResult) -> Void
+    ) async throws(QueryError) -> SqlAdapterKit.QueryResult {
+        try await run(query, onPartial: onPartial)
+    }
+
+}
+
+private extension PostgresAdapter {
+
+    func run(
+        _ query: String,
+        onPartial: (@Sendable (SqlAdapterKit.QueryResult) -> Void)?
+    ) async throws(QueryError) -> SqlAdapterKit.QueryResult {
         try await pool.withCancellableConnection { (connection) throws(QueryError) in
             do {
-                return try await connection.query(query, metaInfo: metaInfo)
+                return try await connection.query(query, metaInfo: metaInfo, onPartial: onPartial)
             } catch (let error as QueryError) {
                 throw error
             } catch {
