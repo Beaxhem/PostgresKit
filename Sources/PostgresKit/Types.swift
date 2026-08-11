@@ -6,32 +6,11 @@
 //
 
 import Foundation
-import SqlAdapterKit
+import DataEngine
 
 public typealias OId = UInt32
 
-public struct PostgresColumn: SqlAdapterKit.Column {
-
-    public let id: Int
-    public let name: String
-    public let type: GenericType
-    public let tableOid: OId
-
-    /// Postgres reports oid 0 for columns that aren't a plain table reference
-    /// (expressions, literals, function results) — those have no owner.
-    public var owner: TableKey? {
-        tableOid == 0 ? nil : .oid(tableOid)
-    }
-
-    init(id: Int, name: String, tableOid: OId, type: GenericType) {
-        self.id = id
-        self.name = name
-        self.tableOid = tableOid
-        self.type = type
-    }
-
-}
-
+/// Postgres' own `typcategory`, from `pg_type`.
 enum PostgresTypeCategory: String {
     case numeric = "N"
     case boolean = "B"
@@ -54,73 +33,126 @@ enum PostgresTypeCategory: String {
     case `internal` = "Z"
 }
 
-struct PostgresType: SqlType {
+/// One entry of `pg_type`, as much of it as the driver reads.
+struct PostgresType {
 
     let name: String
-    private let category: PostgresTypeCategory
 
-    init(name: String, category: PostgresTypeCategory) {
-        self.name = name
-        self.category = category
-    }
+    let category: PostgresTypeCategory
 
-    var genericType: GenericType {
-        .init(name: name, category: genericCategory)
-    }
+    /// Element type for an array, 0 otherwise. What lets `int4[]` describe itself as a
+    /// list *of integers* rather than a list of something unknown.
+    let elementOid: OId
 
-    var genericCategory: TypeCategory {
+}
+
+extension PostgresType {
+
+    /// The shape of a value of this type.
+    ///
+    /// Name first, category second. Postgres files `jsonb`, `bytea` and `uuid` all under
+    /// category `U` — "user-defined" — which is true of the catalog and useless to a
+    /// grid: it would render a JSON document, a blob and an identifier identically. The
+    /// names are stable across every server, so reading them is not a heuristic.
+    ///
+    /// - Parameter types: the whole `pg_type` map, for resolving an array's elements.
+    func shape(resolving types: [OId: PostgresType]) -> DataShape {
+        if let known = Self.shapesByName[name] {
+            return known
+        }
+
         switch category {
         case .numeric:
-            switch name {
-            case "smallint", "integer", "bigint", "numeric", "int2", "int4", "int8":
-                .integer
-            case "real", "double precision", "float4", "float8":
-                .float
-            case "regprocedure", "regoper", "regoperator", "regclass", "regcollation", "regtype", "regrole", "regnamespace":
-                .system
-            default:
-                .float
-            }
+            return .scalar(Self.numericKind(name))
+
         case .boolean:
-            .boolean
+            return .scalar(.boolean)
+
         case .string:
-            switch name {
-            case "char":
-                .nchar
-            case "varchar":
-                .varchar
-            default:
-                .text
-            }
+            return .scalar(name == "char" || name == "bpchar" ? .char : .text)
+
         case .array:
-            .array
-        case .datetime:
-            switch name {
-            case "date":
-                .date
-            case "time":
-                .time
-            case "timestamp":
-                .datetime
-            default:
-                .datetime
+            // `typelem` names the element type. A `_int4` whose element is missing from
+            // the map is still a list, just of something this driver cannot name.
+            guard elementOid != 0, let element = types[elementOid] else {
+                return .list(.unknown)
             }
+
+            return .list(element.shape(resolving: types))
+
+        case .datetime:
+            return .scalar(Self.datetimeKind(name))
+
         case .timespan:
-            .interval
+            return .scalar(.interval)
+
         case .enum:
-            .enumeration
-        case .userDefined:
-            .userDefined
-        case .geometric, .composite, .networkAddress, .range:
-            .unknown
+            return .scalar(.enumeration)
+
+        case .range:
+            // A range is two bounds and their inclusivity — structure, rendered by
+            // Postgres as `[a,b)`. Composite rather than scalar, so it gets the
+            // inspector rather than a text field pretending it is editable.
+            return .variant
+
+        case .composite:
+            return .variant
+
+        case .geometric:
+            return .scalar(.geography)
+
+        case .networkAddress:
+            return .scalar(.text)
+
         case .bitString:
-            .binary
-        case .pseudo:
-            .system
+            return .scalar(.binary)
+
+        case .userDefined, .pseudo, .internal:
+            return .scalar(.opaque)
+
         case .unknown:
-            .unknown
-        case .internal:
-            .system
+            return .unknown
+        }
+    }
+
+}
+
+private extension PostgresType {
+
+    /// Types whose name says more than their category does.
+    static let shapesByName: [String: DataShape] = [
+        "json": .variant,
+        "jsonb": .variant,
+        "bytea": .scalar(.binary),
+        "uuid": .scalar(.uuid),
+        "xml": .scalar(.text),
+        "money": .scalar(.decimal)
+    ]
+
+    static func numericKind(_ name: String) -> ScalarKind {
+        switch name {
+        case "int2", "int4", "int8", "smallint", "integer", "bigint", "oid":
+            .integer
+        case "numeric", "decimal":
+            .decimal
+        case "float4", "float8", "real", "double precision":
+            .float
+        case let name where name.hasPrefix("reg"):
+            // `regclass`, `regtype` and friends are oids wearing a name. Catalog
+            // plumbing, not data.
+            .opaque
+        default:
+            .float
+        }
+    }
+
+    static func datetimeKind(_ name: String) -> ScalarKind {
+        switch name {
+        case "date": .date
+        case "time": .time
+        case "timetz": .time
+        case "timestamptz": .timestampWithZone
+        default: .timestamp
         }
     }
 

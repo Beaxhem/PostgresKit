@@ -12,7 +12,7 @@ let package = Package(
         .library(name: "PostgresKit", targets: ["PostgresKit"])
     ],
     dependencies: [
-        .package(name: "SqlAdapterKit", path: "../SqlAdapterKit")
+        .package(name: "DataEngine", path: "../DataEngine")
     ],
     targets: [
         .binaryTarget(name: "libpq", path: "./Frameworks/libpq.xcframework"),
@@ -25,7 +25,22 @@ let package = Package(
         ),
         .target(
             name: "PostgresKit",
-            dependencies: ["libpq", "CPostgres", "SqlAdapterKit"],
+            dependencies: [
+                "libpq",
+                "CPostgres",
+                .product(name: "DataEngine", package: "DataEngine")
+            ],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx)
+            ]
+        ),
+        .testTarget(
+            name: "PostgresKitTests",
+            dependencies: [
+                .target(name: "PostgresKit"),
+                .product(name: "DataEngine", package: "DataEngine"),
+                .product(name: "DataEngineTestKit", package: "DataEngine")
+            ],
             swiftSettings: [
                 .interoperabilityMode(.Cxx)
             ]

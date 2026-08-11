@@ -7,8 +7,8 @@
 
 import Foundation
 import CPostgres
-import SqlAdapterKit
 import ConnectionPool
+import DataEngine
 
 public struct PostgresConfiguration: Sendable {
 
@@ -39,7 +39,7 @@ struct PostgresConnectionFactory: ConnectionFactory {
     func connect() throws(QueryError) -> PostgresConnection {
         let connection = PQconnectdb(configuration.connectionString)
         if PQstatus(connection) != CONNECTION_OK {
-            defer { PQfinish(connection)}
+            defer { PQfinish(connection) }
 
             throw .init(message: String(cString: PQerrorMessage(connection)))
         }
@@ -49,13 +49,33 @@ struct PostgresConnectionFactory: ConnectionFactory {
 
 }
 
-public final actor PostgresAdapter: SqlAdapter, Sendable {
+/// A connection to a Postgres server.
+///
+/// Migrated off `SqlAdapter` onto ``DataEngine/Session``. What changed is the shape of
+/// what it hands back — ``ColumnDescriptor`` rather than an existential `Column`, an
+/// ``ExecutionOutcome`` rather than a `QueryResult` — and, with it, that the driver now
+/// says what a column *is* rather than which of a fixed list of categories it falls in:
+/// `jsonb` arrives as a composite, `int4[]` as a list of integers.
+///
+/// What deliberately did not change is the pool. `ConnectionPool.withCancellableConnection`
+/// already gets the hard part right — a cancelled statement sends `PQcancel` on a live
+/// connection and then *drops* that connection rather than returning it to the buffer,
+/// so a later borrower cannot inherit a pending cancellation. Rewriting that as part of
+/// a type migration would have risked the one piece of this driver whose failure mode is
+/// silent.
+public final actor PostgresSession: Session {
+
+    public nonisolated let capabilities: EngineCapabilities
 
     private let pool: ConnectionPool<PostgresConnectionFactory>
 
     private let metaInfo = DbInfo()
 
-    public init(configuration: PostgresConfiguration) async throws(QueryError) {
+    public init(
+        configuration: PostgresConfiguration,
+        capabilities: EngineCapabilities = .postgres
+    ) async throws(QueryError) {
+        self.capabilities = capabilities
         self.pool = try await .init(factory: .init(configuration: configuration))
 
         try await pool.withConnection { (connection: PostgresConnection) throws(QueryError) in
@@ -65,36 +85,50 @@ public final actor PostgresAdapter: SqlAdapter, Sendable {
 
 }
 
-public extension PostgresAdapter {
+public extension PostgresSession {
 
-    func query(_ query: String) async throws(QueryError) -> SqlAdapterKit.QueryResult {
-        try await run(query, onPartial: nil)
-    }
+    func execute(
+        _ request: QueryRequest,
+        onPartial: (@Sendable (PartialResult) -> Void)?
+    ) async throws(QueryError) -> ExecutionOutcome {
+        try validate(request)
 
-    func query(
-        _ query: String,
-        onPartial: @escaping @Sendable (SqlAdapterKit.QueryResult) -> Void
-    ) async throws(QueryError) -> SqlAdapterKit.QueryResult {
-        try await run(query, onPartial: onPartial)
-    }
+        guard let sql = request.sql else {
+            throw QueryError(message: "This connection only runs SQL.")
+        }
 
-}
-
-private extension PostgresAdapter {
-
-    func run(
-        _ query: String,
-        onPartial: (@Sendable (SqlAdapterKit.QueryResult) -> Void)?
-    ) async throws(QueryError) -> SqlAdapterKit.QueryResult {
-        try await pool.withCancellableConnection { (connection) throws(QueryError) in
+        return try await pool.withCancellableConnection { connection throws(QueryError) in
             do {
-                return try await connection.query(query, metaInfo: metaInfo, onPartial: onPartial)
-            } catch (let error as QueryError) {
+                return try await connection.execute(sql, metaInfo: metaInfo, onPartial: onPartial)
+            } catch let error as QueryError {
                 throw error
             } catch {
                 throw .cancelled
             }
         }
     }
+
+    /// Cancellation is `.connection`, not `.token`: Postgres cancels over a side channel
+    /// tied to the connection running the statement, so there is no id to address and
+    /// nothing for this to do. The pool sends `PQcancel` from its own cancellation
+    /// handler, which is the only place that still holds the right connection.
+    func cancel(_ handle: ExecutionHandle) async {}
+
+}
+
+public extension EngineCapabilities {
+
+    /// What a Postgres connection can be asked to do.
+    ///
+    /// `.unrestricted` because Postgres reports the table behind each column as a
+    /// `pg_class` oid, so a row can be identified — and where a table declares no
+    /// primary key, matching every selected column is a filter this engine can run
+    /// cheaply on the table sizes people keep in it.
+    static let postgres = EngineCapabilities(
+        mutation: .unrestricted(.all),
+        scripting: .script,
+        cancellation: .connection,
+        identifierFolding: .lower
+    )
 
 }

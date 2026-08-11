@@ -7,8 +7,8 @@
 
 import Foundation
 import CPostgres
-import SqlAdapterKit
 import ConnectionPool
+import DataEngine
 
 final class PostgresConnection: CancellableConnection, @unchecked Sendable {
 
@@ -26,11 +26,11 @@ final class PostgresConnection: CancellableConnection, @unchecked Sendable {
 
 extension PostgresConnection {
 
-    func query(
+    func execute(
         _ query: String,
         metaInfo: DbInfo,
-        onPartial: (@Sendable (QueryResult) -> Void)? = nil
-    ) async throws -> QueryResult {
+        onPartial: (@Sendable (PartialResult) -> Void)? = nil
+    ) async throws -> ExecutionOutcome {
         let start = CFAbsoluteTimeGetCurrent()
 
         // Stream the result set one row at a time instead of letting libpq
@@ -67,7 +67,7 @@ extension PostgresConnection {
         // results and a result needs its columns — capturing them at construction is
         // what keeps the emit closure free of mutable state.
         var builder: StreamingResultBuilder?
-        var columns: [PostgresColumn]?
+        var columns: [ColumnDescriptor]?
         var pendingError: String?
 
         // Rows stop being reported early once any statement has completed.
@@ -75,9 +75,9 @@ extension PostgresConnection {
         // A later statement supersedes an earlier one and rows already handed over
         // cannot be taken back, so streaming a script is not something this can make
         // safe: nothing here knows whether the statement in flight is the last one
-        // until the next arrives. The contract is on the caller — ``SqlAdapter``
-        // documents that a streamed run must be a single statement, and
-        // `QueryViewModel` is where that is enforced.
+        // until the next arrives. The contract is on the caller — ``Session`` documents
+        // that a streamed run must be a single statement, and `QueryRunner` is where
+        // that is enforced.
         //
         // What this does buy is that the *damage* is bounded to the first statement:
         // a script whose second statement supersedes a first has already stopped
@@ -114,13 +114,7 @@ extension PostgresConnection {
                     statementBuilder = StreamingResultBuilder(
                         onPartial: (mayStream ? onPartial : nil).map { emit in
                             { store in
-                                emit(
-                                    QueryResult(
-                                        columns: statementColumns,
-                                        store: store,
-                                        executionInfo: .init(duration: CFAbsoluteTimeGetCurrent() - start)
-                                    )
-                                )
+                                emit(PartialResult(columns: statementColumns, store: store))
                             }
                         }
                     )
@@ -189,27 +183,25 @@ extension PostgresConnection {
             throw QueryError(message: pendingError)
         }
 
-        let info = ExecutionInfo(duration: CFAbsoluteTimeGetCurrent() - start)
+        let statistics = ExecutionStatistics(duration: CFAbsoluteTimeGetCurrent() - start)
 
         // Nothing at all came back — not a command, not a result set. Nothing observed
         // reaches here, but a driver that grew a status we do not handle would.
         guard let latest else {
-            return .empty
+            return ExecutionOutcome(columns: [], store: .empty, statistics: statistics)
         }
 
         switch latest {
         case .rows(let columns, let builder):
-            let store = builder.makeStore()
-
-            return .init(columns: columns, store: store, executionInfo: info)
+            return ExecutionOutcome(columns: columns, store: builder.makeStore(), statistics: statistics)
         case .command(let summary):
-            return .command(summary, executionInfo: info)
+            return .command(summary, statistics: statistics)
         }
     }
 
     /// The last completed statement, whichever kind it was.
     private enum Outcome {
-        case rows(columns: [PostgresColumn], builder: StreamingResultBuilder)
+        case rows(columns: [ColumnDescriptor], builder: StreamingResultBuilder)
         case command(CommandSummary)
     }
 
@@ -241,24 +233,29 @@ extension PostgresConnection {
 
     /// Build the column descriptors from any result that carries field metadata
     /// (a `PGRES_SINGLE_TUPLE` row or the terminal `PGRES_TUPLES_OK`).
-    private static func makeColumns(_ result: OpaquePointer?, metaInfo: DbInfo) -> [PostgresColumn] {
+    ///
+    /// `PQftable` is what makes this connection's grid editable where ClickHouse's is
+    /// not: Postgres names the table each column was selected from, as a `pg_class` oid,
+    /// and that oid is what the catalog's primary keys are keyed by. An oid of 0 means
+    /// the column is not a plain table reference — an expression, a literal, a function
+    /// result — and a column with no owner is read-only downstream.
+    private static func makeColumns(_ result: OpaquePointer?, metaInfo: DbInfo) -> [ColumnDescriptor] {
         let columnsCount = PQnfields(result)
 
-        var columns: [PostgresColumn] = []
+        var columns: [ColumnDescriptor] = []
         columns.reserveCapacity(Int(columnsCount))
 
         for column in 0..<columnsCount {
             let tableOid = PQftable(result, column)
             let typeOid = PQftype(result, column)
 
-            let type = metaInfo.oidToType[typeOid] ?? .init(name: "#UNKNOWN", category: .unknown)
-
             columns.append(
-                .init(
+                ColumnDescriptor(
                     id: Int(column),
                     name: String(cString: PQfname(result, column)),
-                    tableOid: tableOid,
-                    type: type.genericType
+                    typeName: metaInfo.name(of: typeOid),
+                    shape: metaInfo.shape(of: typeOid),
+                    origin: tableOid == 0 ? nil : .handle(UInt64(tableOid))
                 )
             )
         }
@@ -266,12 +263,8 @@ extension PostgresConnection {
         return columns
     }
 
-    func cancelQuery<Factory, Pool>(pool: Pool) async throws(QueryError) where PostgresConnection == Factory.C, Factory : ConnectionFactory, Pool : ConnectionPool<Factory> {
-        print("POSTGRES: trying to cancel query")
-        guard let cancel = PQgetCancel(connection) else {
-            print("Failed to get cancel object", String(cString: PQerrorMessage(connection)))
-            return
-        }
+    func cancelQuery<Factory, Pool>(pool: Pool) async throws(QueryError) where PostgresConnection == Factory.C, Factory: ConnectionFactory, Pool: ConnectionPool<Factory> {
+        guard let cancel = PQgetCancel(connection) else { return }
 
         defer { PQfreeCancel(cancel) }
 
@@ -279,14 +272,10 @@ extension PostgresConnection {
         let errbuf = UnsafeMutablePointer<CChar>.allocate(capacity: bufferSize)
         defer { errbuf.deallocate() }
 
-        let success = PQcancel(cancel, errbuf, Int32(bufferSize)) != 0
-
-        if success {
-            print("Query cancel request sent successfully.")
-        } else {
-            let errorMessage = String(cString: errbuf)
-            print("Failed to send cancel request: \(errorMessage)")
-        }
+        // Best effort, and deliberately quiet on failure: the statement may have
+        // finished between the user pressing stop and this arriving, which is not
+        // something to report.
+        _ = PQcancel(cancel, errbuf, Int32(bufferSize))
     }
 
 }
