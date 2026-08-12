@@ -124,9 +124,19 @@ public extension EngineCapabilities {
     /// `pg_class` oid, so a row can be identified — and where a table declares no
     /// primary key, matching every selected column is a filter this engine can run
     /// cheaply on the table sizes people keep in it.
+    ///
+    /// `.implicitPerRequest`, which is a statement about the protocol rather than about
+    /// the server: everything in one simple-query message runs in one implicit
+    /// transaction, committed when the message completes and rolled back entirely if any
+    /// statement in it fails. `execute` sends the whole request in a single
+    /// `PQsendQuery`, so an atomic request is already atomic and this driver adds
+    /// nothing. Adding a `BEGIN` anyway would break it: a script that failed halfway
+    /// would never reach its `COMMIT`, and the pool would take the connection back with
+    /// a transaction still open on it.
     static let postgres = EngineCapabilities(
         mutation: .unrestricted(.all),
         scripting: .script,
+        transactions: .implicitPerRequest,
         cancellation: .connection,
         identifierFolding: .lower
     )
