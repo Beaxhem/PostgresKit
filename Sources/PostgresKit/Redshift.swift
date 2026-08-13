@@ -30,7 +30,14 @@ public struct RedshiftEngine: DatabaseEngine {
             id: Self.identifier,
             displayName: "Redshift",
             badge: "RS",
-            catalog: .databaseSchema,
+            // Tables and views only, which is what `svv_redshift_tables` can be trusted
+            // to classify. No sequences — Redshift has `IDENTITY` columns and no
+            // `CREATE SEQUENCE` — and no routines yet: Redshift's `pg_proc` is inherited
+            // from a Postgres old enough to predate `prokind`, so telling a function
+            // from a procedure there needs checking against a real cluster rather than
+            // assuming Postgres's catalog. A kind that cannot be listed is worse than
+            // one that is absent, because the switch offers it and it comes back empty.
+            catalog: .databaseSchema.listing(.relations),
             capabilities: .redshift,
             settings: SettingsSchema(sections: [
                 .init("Cluster", fields: [
