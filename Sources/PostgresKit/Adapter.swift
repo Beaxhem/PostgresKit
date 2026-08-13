@@ -10,6 +10,19 @@ import CPostgres
 import ConnectionPool
 import DataEngine
 
+/// What libpq should do about TLS.
+///
+/// Only the two values that are actually chosen between here. `prefer` is libpq's own
+/// default — encrypt if the server offers it, connect anyway if it does not — and
+/// `require` refuses to connect in the clear, which is what a managed cluster reached
+/// over the internet needs.
+public enum PostgresSSLMode: String, Sendable {
+
+    case prefer
+    case require
+
+}
+
 public struct PostgresConfiguration: Sendable {
 
     public var username: String
@@ -17,18 +30,49 @@ public struct PostgresConfiguration: Sendable {
     public var host: String
     public var port: Int16
     public var database: String?
+    public var sslMode: PostgresSSLMode
 
+    /// The libpq connection URI.
+    ///
+    /// User and password are percent-encoded, which they were not before Redshift
+    /// arrived and found the gap: a password containing `@` or `/` — which AWS hands out
+    /// routinely — silently reshaped the URI, so libpq parsed part of the password as a
+    /// host and reported a connection failure naming a host nobody typed.
     public var connectionString: String {
-        "postgres://\(username):\(password)@\(host):\(port)/\(database ?? "")"
+        let user = Self.encode(username)
+        let secret = Self.encode(password)
+
+        return "postgres://\(user):\(secret)@\(host):\(port)/\(database ?? "")?sslmode=\(sslMode.rawValue)"
     }
 
-    public init(username: String, password: String, host: String, port: Int16, database: String?) {
+    public init(
+        username: String,
+        password: String,
+        host: String,
+        port: Int16,
+        database: String?,
+        sslMode: PostgresSSLMode = .prefer
+    ) {
         self.username = username
         self.password = password
         self.host = host
         self.port = port
         self.database = database
+        self.sslMode = sslMode
     }
+
+    /// Percent-encodes one URI component. `urlUserAllowed` still permits the
+    /// sub-delimiters, so `:` and `@` — the two that actually break the parse — are the
+    /// ones this escapes.
+    private static func encode(_ component: String) -> String {
+        component.addingPercentEncoding(withAllowedCharacters: .postgresURIComponent) ?? component
+    }
+
+}
+
+private extension CharacterSet {
+
+    static let postgresURIComponent = CharacterSet.alphanumerics.union(.init(charactersIn: "-._~"))
 
 }
 
