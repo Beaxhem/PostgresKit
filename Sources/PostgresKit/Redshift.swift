@@ -94,7 +94,7 @@ public extension RedshiftEngine {
             username: settings.string(.username, default: ""),
             password: settings.string(.password, default: ""),
             host: settings.string(.host, default: ""),
-            port: Int16(settings.int(.port, default: defaultPort)),
+            port: settings.port(default: UInt16(defaultPort)),
             database: settings.string(.database),
             sslMode: settings.bool(.useTLS, default: true) ? .require : .prefer
         )

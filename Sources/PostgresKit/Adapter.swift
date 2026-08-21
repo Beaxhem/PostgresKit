@@ -28,7 +28,7 @@ public struct PostgresConfiguration: Sendable {
     public var username: String
     public var password: String
     public var host: String
-    public var port: Int16
+    public var port: UInt16
     public var database: String?
     public var sslMode: PostgresSSLMode
 
@@ -49,7 +49,7 @@ public struct PostgresConfiguration: Sendable {
         username: String,
         password: String,
         host: String,
-        port: Int16,
+        port: UInt16,
         database: String?,
         sslMode: PostgresSSLMode = .prefer
     ) {

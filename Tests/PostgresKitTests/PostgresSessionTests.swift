@@ -260,7 +260,7 @@ enum PostgresServer {
             username: environment["POSTGRES_TEST_USER"] ?? "postgres",
             password: environment["POSTGRES_TEST_PASSWORD"] ?? "secret",
             host: environment["POSTGRES_TEST_HOST"] ?? "localhost",
-            port: Int16(environment["POSTGRES_TEST_PORT"] ?? "15432") ?? 15432,
+            port: UInt16(environment["POSTGRES_TEST_PORT"] ?? "15432") ?? 15432,
             database: environment["POSTGRES_TEST_DB"] ?? "demo"
         )
     }
