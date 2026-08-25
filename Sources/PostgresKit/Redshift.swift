@@ -38,6 +38,17 @@ public struct RedshiftEngine: DatabaseEngine {
             // assuming Postgres's catalog. A kind that cannot be listed is worse than
             // one that is absent, because the switch offers it and it comes back empty.
             catalog: .databaseSchema.listing(.relations),
+            // Storage and nothing else for a table — Redshift has no `SHOW CREATE TABLE`
+            // any more than Postgres does, and everything about a *column* is in the grid
+            // header. So a Redshift table gets the same one-line strip a Postgres one
+            // does, over `svv_table_info`, which answers with the facts a Redshift table
+            // is actually tuned on: distribution style, sort key, how much is unsorted.
+            //
+            // Read-only throughout, because the connection is.
+            inspection: [
+                .table: [.storage],
+                .view: [.definition, .columns]
+            ],
             capabilities: .redshift,
             settings: SettingsSchema(sections: [
                 .init("Cluster", fields: [
