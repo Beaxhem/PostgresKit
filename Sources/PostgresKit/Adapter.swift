@@ -38,11 +38,24 @@ public struct PostgresConfiguration: Sendable {
     /// arrived and found the gap: a password containing `@` or `/` — which AWS hands out
     /// routinely — silently reshaped the URI, so libpq parsed part of the password as a
     /// host and reported a connection failure naming a host nobody typed.
+    ///
+    /// The database name is encoded for the same reason and one more: unlike the
+    /// credentials it is *server-supplied*. Descending into a database reconnects with
+    /// the name the catalog listed — see `PostgresProvider.descend` — so a `?` in it
+    /// would open a query string and everything after it would be read as connection
+    /// parameters rather than as part of the name. A `/`, `#`, `@` or space merely
+    /// breaks the parse.
+    ///
+    /// `host` is deliberately *not* encoded: it is typed by the user rather than
+    /// reported by a server, and the unreserved-only set below would mangle the two
+    /// spellings libpq expects here — a bracketed IPv6 literal (`[::1]`) and a Unix
+    /// socket directory path.
     public var connectionString: String {
         let user = Self.encode(username)
         let secret = Self.encode(password)
+        let name = Self.encode(database ?? "")
 
-        return "postgres://\(user):\(secret)@\(host):\(port)/\(database ?? "")?sslmode=\(sslMode.rawValue)"
+        return "postgres://\(user):\(secret)@\(host):\(port)/\(name)?sslmode=\(sslMode.rawValue)"
     }
 
     public init(
