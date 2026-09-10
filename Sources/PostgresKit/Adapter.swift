@@ -144,9 +144,41 @@ public final actor PostgresSession: Session {
 
 public extension PostgresSession {
 
+    /// Runs `request`, reporting rows early for the **first** statement only.
+    ///
+    /// Preserved exactly as it was: a caller holding one grid has nowhere to put a second
+    /// statement's rows and cannot take back what it has already drawn. Everything that
+    /// wants the rest asks through ``run(_:reporting:)``.
     func execute(
         _ request: QueryRequest,
         onPartial: (@Sendable (PartialResult) -> Void)?
+    ) async throws(QueryError) -> ExecutionOutcome {
+        guard let onPartial else { return try await perform(request, reporting: nil) }
+
+        return try await perform(request) { event in
+            guard case .partial(let index, let partial) = event, index == 0 else { return }
+
+            onPartial(partial)
+        }
+    }
+
+    /// Runs `request`, reporting every statement of it.
+    ///
+    /// The script still goes to the server as one `PQsendQuery`, so Postgres still wraps
+    /// it in the implicit transaction that ``TransactionSupport/implicitPerRequest``
+    /// describes — and a failure still rolls all of it back. That is why the app states
+    /// the rollback above the results rather than letting a green statement above a red
+    /// one imply its writes survived.
+    func run(
+        _ request: QueryRequest,
+        reporting: (@Sendable (RunEvent) -> Void)?
+    ) async throws(QueryError) -> ExecutionOutcome {
+        try await perform(request, reporting: reporting)
+    }
+
+    private func perform(
+        _ request: QueryRequest,
+        reporting: (@Sendable (RunEvent) -> Void)?
     ) async throws(QueryError) -> ExecutionOutcome {
         try validate(request)
 
@@ -156,7 +188,7 @@ public extension PostgresSession {
 
         return try await pool.withCancellableConnection { connection throws(QueryError) in
             do {
-                return try await connection.execute(sql, metaInfo: metaInfo, onPartial: onPartial)
+                return try await connection.execute(sql, metaInfo: metaInfo, reporting: reporting)
             } catch let error as QueryError {
                 throw error
             } catch {
@@ -192,7 +224,7 @@ public extension EngineCapabilities {
     /// a transaction still open on it.
     static let postgres = EngineCapabilities(
         mutation: .unrestricted(.all),
-        scripting: .script,
+        scripting: .script(.perStatement),
         transactions: .implicitPerRequest,
         cancellation: .connection,
         identifierFolding: .lower

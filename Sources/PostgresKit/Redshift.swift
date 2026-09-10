@@ -136,7 +136,7 @@ public extension EngineCapabilities {
     /// `PQcancel`.
     static let redshift = EngineCapabilities(
         mutation: .readOnly,
-        scripting: .script,
+        scripting: .script(.perStatement),
         transactions: .implicitPerRequest,
         cancellation: .connection,
         cost: .free,

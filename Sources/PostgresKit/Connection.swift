@@ -26,10 +26,17 @@ final class PostgresConnection: CancellableConnection, @unchecked Sendable {
 
 extension PostgresConnection {
 
+    /// Runs `query`, reporting each statement of it as it completes.
+    ///
+    /// `PQexec` reported only the last statement of a multi-statement string;
+    /// `PQgetResult` instead surfaces one result set per statement, which this loop has
+    /// always drained and then thrown away all but the last of. Reporting them is the
+    /// whole of the change — the same string goes to the same `PQsendQuery`, so the
+    /// implicit per-request transaction Postgres wraps it in is untouched.
     func execute(
         _ query: String,
         metaInfo: DbInfo,
-        onPartial: (@Sendable (PartialResult) -> Void)? = nil
+        reporting: (@Sendable (RunEvent) -> Void)? = nil
     ) async throws -> ExecutionOutcome {
         let start = CFAbsoluteTimeGetCurrent()
 
@@ -50,17 +57,14 @@ extension PostgresConnection {
         // correctly — we just lose the memory win for this query.
         _ = PQsetSingleRowMode(connection)
 
-        // `PQexec` reported only the *last* statement of a multi-statement string;
-        // `PQgetResult` instead surfaces one result set per statement. To preserve
-        // that behaviour we build each statement's rows into its own arena and keep
-        // only the most recently completed statement — column counts can differ
-        // between statements, and a single shared arena would both merge unrelated
-        // rows and trip the builder's rectangular-rows assertion.
+        // Each statement's rows go into their own arena: column counts differ between
+        // statements, and a shared arena would both merge unrelated rows and trip the
+        // builder's rectangular-rows assertion.
         //
-        // A statement that returns no rows is still a statement that finished, so it
-        // takes this slot too rather than clearing it: what a script's last statement
-        // did is the answer, whether or not it was a SELECT.
-        var latest: Outcome?
+        // `latest` is still kept, and still takes a command as readily as a result set:
+        // what a script's last statement did is the answer this function returns,
+        // whether or not it was a SELECT, exactly as it was under `PQexec`.
+        var latest: ExecutionOutcome?
 
         // In-flight statement. The builder is made once this statement's columns are
         // known rather than up front, because a streamed run has to hand out whole
@@ -70,19 +74,18 @@ extension PostgresConnection {
         var columns: [ColumnDescriptor]?
         var pendingError: String?
 
-        // Rows stop being reported early once any statement has completed.
-        //
-        // A later statement supersedes an earlier one and rows already handed over
-        // cannot be taken back, so streaming a script is not something this can make
-        // safe: nothing here knows whether the statement in flight is the last one
-        // until the next arrives. The contract is on the caller — ``Session`` documents
-        // that a streamed run must be a single statement, and `QueryRunner` is where
-        // that is enforced.
-        //
-        // What this does buy is that the *damage* is bounded to the first statement:
-        // a script whose second statement supersedes a first has already stopped
-        // streaming by then.
-        var mayStream = onPartial != nil
+        // Which statement is being drained, and when it began. The index is what a
+        // reported outcome is addressed by — the driver has `PGresult`s, not character
+        // offsets, so an ordinal is the whole of a result's identity.
+        var statementIndex = 0
+        var statementStart = start
+
+        // The old `mayStream` guard is gone. It existed because a later statement
+        // superseded an earlier one's result and rows already handed over cannot be
+        // taken back — so a script could only ever stream its first statement. A partial
+        // now carries the index of the statement it belongs to, and there is nothing
+        // left to supersede; a caller that still wants one grid's worth says so by
+        // ignoring the rest. See ``execute(_:metaInfo:onPartial:)``.
 
         // A streamed query owns the connection until `PQgetResult` returns nil.
         // On a SQL error we must keep draining to the end: the pool returns a
@@ -110,11 +113,17 @@ extension PostgresConnection {
                     statementBuilder = builder
                 } else {
                     let statementColumns = columns ?? []
+                    let index = statementIndex
 
                     statementBuilder = StreamingResultBuilder(
-                        onPartial: (mayStream ? onPartial : nil).map { emit in
+                        onPartial: reporting.map { emit in
                             { store in
-                                emit(PartialResult(columns: statementColumns, store: store))
+                                emit(
+                                    .partial(
+                                        index: index,
+                                        PartialResult(columns: statementColumns, store: store)
+                                    )
+                                )
                             }
                         }
                     )
@@ -146,13 +155,22 @@ extension PostgresConnection {
 
                 // `PGRES_TUPLES_OK` terminates the current statement's result set.
                 if status == PGRES_TUPLES_OK, let statementColumns = columns {
-                    latest = .rows(columns: statementColumns, builder: statementBuilder)
+                    let outcome = ExecutionOutcome(
+                        columns: statementColumns,
+                        store: statementBuilder.makeStore(),
+                        statistics: .init(duration: CFAbsoluteTimeGetCurrent() - statementStart)
+                    )
+
+                    latest = outcome
                     builder = nil
                     columns = nil
 
-                    // Anything after this is a second statement, whose result would
-                    // replace what has already been shown.
-                    mayStream = false
+                    reporting?(
+                        .statement(StatementOutcome(index: statementIndex, disposition: .succeeded(outcome)))
+                    )
+
+                    statementIndex += 1
+                    statementStart = CFAbsoluteTimeGetCurrent()
                 }
             case PGRES_COMMAND_OK, PGRES_EMPTY_QUERY:
                 // A statement with no result set (INSERT/UPDATE/DDL, or empty). It
@@ -160,15 +178,46 @@ extension PostgresConnection {
                 // over an earlier SELECT — as it did under `PQexec`. What it did is
                 // carried out rather than dropped, so the grid can say so instead of
                 // drawing an empty table.
-                latest = .command(Self.makeCommandSummary(result))
+                guard pendingError == nil else { continue }
+
+                let outcome = ExecutionOutcome.command(
+                    Self.makeCommandSummary(result),
+                    statistics: .init(duration: CFAbsoluteTimeGetCurrent() - statementStart)
+                )
+
+                latest = outcome
                 builder = nil
                 columns = nil
-                mayStream = false
+
+                reporting?(
+                    .statement(StatementOutcome(index: statementIndex, disposition: .succeeded(outcome)))
+                )
+
+                statementIndex += 1
+                statementStart = CFAbsoluteTimeGetCurrent()
             default:
                 // Latch the first error, then keep looping so the connection is
                 // fully drained before we surface it.
+                //
+                // Reported here as well as latched, because the driver is the only thing
+                // that knows *which* statement broke — it is the one counting them. What
+                // it cannot know is how many were left behind: libpq abandons the rest of
+                // the message and never mentions them, and finding out would mean
+                // splitting the script, which is exactly what this design does not do. So
+                // a run says where it stopped and never claims "4 of 9".
                 if pendingError == nil {
-                    pendingError = String(cString: PQerrorMessage(connection))
+                    let message = String(cString: PQerrorMessage(connection))
+
+                    pendingError = message
+
+                    reporting?(
+                        .statement(
+                            StatementOutcome(
+                                index: statementIndex,
+                                disposition: .failed(QueryError(message: message))
+                            )
+                        )
+                    )
                 }
             }
         }
@@ -191,18 +240,36 @@ extension PostgresConnection {
             return ExecutionOutcome(columns: [], store: .empty, statistics: statistics)
         }
 
-        switch latest {
-        case .rows(let columns, let builder):
-            return ExecutionOutcome(columns: columns, store: builder.makeStore(), statistics: statistics)
-        case .command(let summary):
-            return .command(summary, statistics: statistics)
-        }
+        // Restated with the *run's* wall time rather than the last statement's, because
+        // that is what this function has always returned and what the tile's stats line
+        // reads. Each reported statement kept its own figure, which is the one a chip
+        // wants — the two are different questions and now have different answers.
+        return ExecutionOutcome(
+            columns: latest.columns,
+            store: latest.store,
+            command: latest.command,
+            statistics: statistics,
+            delivery: latest.delivery
+        )
     }
 
-    /// The last completed statement, whichever kind it was.
-    private enum Outcome {
-        case rows(columns: [ColumnDescriptor], builder: StreamingResultBuilder)
-        case command(CommandSummary)
+    /// Runs `query`, reporting rows early for the **first** statement only.
+    ///
+    /// The shape every existing caller has, preserved exactly: a caller holding one grid
+    /// has nowhere to put a second statement's rows and cannot take back what it has
+    /// already drawn.
+    func execute(
+        _ query: String,
+        metaInfo: DbInfo,
+        onPartial: (@Sendable (PartialResult) -> Void)?
+    ) async throws -> ExecutionOutcome {
+        guard let onPartial else { return try await execute(query, metaInfo: metaInfo, reporting: nil) }
+
+        return try await execute(query, metaInfo: metaInfo) { event in
+            guard case .partial(let index, let partial) = event, index == 0 else { return }
+
+            onPartial(partial)
+        }
     }
 
     /// Reads a `PGRES_COMMAND_OK` result's own account of itself.

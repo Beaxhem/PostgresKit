@@ -125,6 +125,137 @@ struct PostgresSessionTests {
         _ = try await session.execute(sql: "DROP TABLE qn_script")
     }
 
+    /// Every statement of a script is reported, in order, and the return value still
+    /// means what it always did.
+    ///
+    /// The second half matters as much as the first: `execute` is what the catalog
+    /// providers, the object inspector and the apply all use, and none of them asked for
+    /// per-statement reporting.
+    @Test("a script reports every statement, and still returns the last")
+    func scriptReportsEveryStatement() async throws {
+        let session = try await PostgresServer.session()
+
+        _ = try await session.execute(sql: "DROP TABLE IF EXISTS qn_report")
+
+        let recorder = OutcomeRecorder()
+
+        let returned = try await session.run(
+            QueryRequest(
+                sql: """
+                CREATE TABLE qn_report (id int);
+                INSERT INTO qn_report VALUES (1), (2);
+                SELECT id FROM qn_report ORDER BY id
+                """
+            ),
+            reporting: { recorder.record($0) }
+        )
+
+        let reported = recorder.outcomes
+
+        #expect(reported.count == 3)
+        #expect(reported.map(\.index) == [0, 1, 2])
+
+        #expect(reported[0].disposition.outcome?.command?.tag == "CREATE TABLE")
+        #expect(reported[1].disposition.outcome?.command?.affectedRows == 2)
+        #expect(reported[2].disposition.hasRows)
+        #expect(reported[2].disposition.outcome?.rowCount == 2)
+
+        // Unchanged: the last statement is still what a single-outcome caller gets.
+        #expect(returned.rowCount == 2)
+        #expect(returned.columns.map(\.name) == ["id"])
+
+        _ = try await session.execute(sql: "DROP TABLE qn_report")
+    }
+
+    /// A failure is attributed to the statement that broke, and the statements that ran
+    /// before it are reported as having succeeded — which, on this engine, is true of
+    /// what they *returned* and not of what they wrote.
+    ///
+    /// Postgres wraps a multi-command string in one implicit transaction, so the
+    /// `CREATE TABLE` below is rolled back along with everything else. That is exactly
+    /// why `RunOutcome.Rollback` is a run-level fact stated above the results: a green
+    /// statement above a red one must not be read as "this part landed". The check at
+    /// the end is what would catch it if the implicit transaction ever stopped applying.
+    ///
+    /// The failure has to be a *runtime* one — `1/0` — and not a syntax error. See
+    /// ``syntaxErrorRunsNothing`` for why the difference is not a detail.
+    @Test("a failing statement is reported at its own index, and the prefix is rolled back")
+    func failureIsAttributedAndRolledBack() async throws {
+        let session = try await PostgresServer.session()
+
+        _ = try await session.execute(sql: "DROP TABLE IF EXISTS qn_rollback")
+
+        let recorder = OutcomeRecorder()
+
+        await #expect(throws: QueryError.self) {
+            try await session.run(
+                QueryRequest(sql: "CREATE TABLE qn_rollback (id int); SELECT 1 AS a; SELECT 1/0"),
+                reporting: { recorder.record($0) }
+            )
+        }
+
+        let reported = recorder.outcomes
+
+        try #require(reported.count == 3)
+        #expect(reported.map(\.index) == [0, 1, 2])
+
+        #expect(reported[0].disposition.outcome?.command?.tag == "CREATE TABLE")
+        #expect(reported[1].disposition.hasRows)
+
+        #expect(reported[2].disposition.error != nil)
+
+        // The table the first statement reported creating is not there. Nothing in the
+        // per-statement reports says so, and nothing should: it is one fact about the
+        // whole run, and this is the test that keeps it a fact.
+        let exists = try await session.execute(
+            sql: "SELECT to_regclass('qn_rollback') IS NOT NULL AS present"
+        )
+
+        #expect(exists.store.field(row: 0, column: 0).value == "f")
+    }
+
+    /// A syntax error anywhere in a script means **no statement runs at all**, and the
+    /// whole message comes back as one failure.
+    ///
+    /// Postgres parses a simple-query message whole before executing any of it, so a bad
+    /// verb in the third statement is caught before the first is planned. libpq therefore
+    /// reports a single `PGRES_FATAL_ERROR` for the message rather than two results and
+    /// then an error.
+    ///
+    /// Worth pinning because it is invisible from the app: the run reports one failed
+    /// statement at index 0, and index 0 is not really at fault — nothing is, except the
+    /// message. Anything that renders "statement 1 failed" from this is telling the user
+    /// where the run stopped, which is true, and not whose fault it was, which it does
+    /// not know. Contrast ``failureIsAttributedAndRolledBack``, where the statements
+    /// before the failure genuinely ran.
+    @Test("a syntax error anywhere means nothing ran")
+    func syntaxErrorRunsNothing() async throws {
+        let session = try await PostgresServer.session()
+
+        _ = try await session.execute(sql: "DROP TABLE IF EXISTS qn_unparsed")
+
+        let recorder = OutcomeRecorder()
+
+        await #expect(throws: QueryError.self) {
+            try await session.run(
+                QueryRequest(sql: "CREATE TABLE qn_unparsed (id int); SELECT 1 AS a; SELEKT 2"),
+                reporting: { recorder.record($0) }
+            )
+        }
+
+        let reported = recorder.outcomes
+
+        try #require(reported.count == 1)
+        #expect(reported[0].index == 0)
+        #expect(reported[0].disposition.error != nil)
+
+        let exists = try await session.execute(
+            sql: "SELECT to_regclass('qn_unparsed') IS NOT NULL AS present"
+        )
+
+        #expect(exists.store.field(row: 0, column: 0).value == "f")
+    }
+
     /// A write says what it did. DDL reports no row count at all rather than zero —
     /// "changed nothing" and "not applicable" are different claims.
     @Test("commands report a tag, and a row count only where there is one")
@@ -324,5 +455,104 @@ private final class Counter: @unchecked Sendable {
     }
 
     var counts: [Int] { lock.withLock { rows } }
+
+}
+
+/// Collects statement outcomes from the driver's own thread — the reports are made
+/// synchronously from inside the `PQgetResult` drain loop.
+private final class OutcomeRecorder: @unchecked Sendable {
+
+    private let lock = NSLock()
+
+    private var recorded: [StatementOutcome] = []
+
+    func record(_ event: RunEvent) {
+        guard case .statement(let outcome) = event else { return }
+
+        lock.lock()
+        defer { lock.unlock() }
+
+        recorded.append(outcome)
+    }
+
+    var outcomes: [StatementOutcome] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return recorded
+    }
+
+}
+
+/// Whether a script streams *every* statement's rows, or only its first.
+///
+/// Its own suite because it is the only question here that is about libpq's mode rather
+/// than about the driver: `PQsetSingleRowMode` is documented as applying to "the current
+/// query", and a simple-query message carrying three statements is one query with three
+/// result sets. Whether the mode survives the boundary between them is not something the
+/// driver can assert — it has to be asked.
+@Suite("Postgres script streaming", .enabled(if: PostgresServer.isReachable))
+struct PostgresScriptStreamingTests {
+
+    @Test("every statement of a script publishes rows as they arrive")
+    func streamsEveryStatement() async throws {
+        let session = try await PostgresServer.session()
+
+        let partials = PartialsByStatement()
+
+        _ = try await session.run(
+            QueryRequest(
+                sql: """
+                SELECT i, i::text FROM generate_series(1, 200000) AS i;
+                SELECT i, i::text FROM generate_series(1, 200000) AS i;
+                """
+            )
+        ) { event in
+            guard case .partial(let index, let partial) = event else { return }
+
+            partials.record(index, rows: partial.store.rowCount)
+        }
+
+        let seen = partials.counts
+
+        #expect(!(seen[0] ?? []).isEmpty, "statement 1 published nothing")
+        #expect(
+            !(seen[1] ?? []).isEmpty,
+            "statement 2 published nothing — single-row mode did not survive the statement boundary"
+        )
+
+        for (index, counts) in seen {
+            #expect(
+                zip(counts, counts.dropFirst()).allSatisfy { $0 < $1 },
+                "statement \(index + 1)'s publications were not monotonic"
+            )
+        }
+    }
+
+}
+
+/// Partial row counts, per statement ordinal.
+///
+/// A lock rather than an actor: drivers report synchronously, on their own drain thread,
+/// and are contractually forbidden from blocking it — so the recording has to be cheap
+/// and cannot suspend.
+final class PartialsByStatement: @unchecked Sendable {
+
+    private let lock = NSLock()
+
+    private var storage: [Int: [Int]] = [:]
+
+    func record(_ index: Int, rows: Int) {
+        lock.lock()
+        storage[index, default: []].append(rows)
+        lock.unlock()
+    }
+
+    var counts: [Int: [Int]] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return storage
+    }
 
 }
