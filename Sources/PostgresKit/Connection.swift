@@ -22,6 +22,28 @@ final class PostgresConnection: CancellableConnection, @unchecked Sendable {
         PQfinish(connection)
     }
 
+    /// Whether libpq still believes this connection is usable.
+    ///
+    /// A local read of client state, not a round trip — which is what makes it usable on
+    /// the borrow path, where a round trip would put a full RTT in front of every query
+    /// the pool serves.
+    ///
+    /// It answers exactly one question, and it is the common one: *has this connection
+    /// already been found to be broken?* After a laptop wakes, or a VPN comes up and
+    /// changes the route out, the sockets in the pool are dead and libpq latches
+    /// `CONNECTION_BAD` on the first failed operation. What this cannot see is a
+    /// connection that died silently and has not been used since; that one is caught by
+    /// the failure being classified as ``FailureKind/transport`` when it is finally
+    /// tried, and the connection being dropped rather than returned to the pool.
+    var isAlive: Bool {
+        guard PQstatus(connection) == CONNECTION_OK else { return false }
+
+        // And the socket itself, which is what catches the connection nothing has tried
+        // to use since the network changed underneath it — the case `PQstatus` cannot
+        // see, because libpq has had no reason to look. See ``DataEngine/SocketHealth``.
+        return SocketHealth.isQuiet(PQsocket(connection))
+    }
+
 }
 
 extension PostgresConnection {
@@ -49,7 +71,14 @@ extension PostgresConnection {
         // of the whole result set.
 
         guard PQsendQuery(connection, query) == 1 else {
-            throw QueryError(message: String(cString: PQerrorMessage(connection)))
+            // No `PGresult` exists yet, so the connection's own status is the only
+            // witness — and it is a good one here: libpq refuses to send on a socket it
+            // has already found to be dead, which is exactly the case this distinguishes
+            // from a send that failed for any other reason.
+            throw QueryError(
+                message: String(cString: PQerrorMessage(connection)),
+                kind: PostgresFailure.of(connection: connection)
+            )
         }
 
         // Best effort: if this fails, libpq falls back to buffering the whole set
@@ -72,7 +101,7 @@ extension PostgresConnection {
         // what keeps the emit closure free of mutable state.
         var builder: StreamingResultBuilder?
         var columns: [ColumnDescriptor]?
-        var pendingError: String?
+        var pendingFailure: QueryError?
 
         // Which statement is being drained, and when it began. The index is what a
         // reported outcome is addressed by — the driver has `PGresult`s, not character
@@ -104,7 +133,7 @@ extension PostgresConnection {
                 }
 
                 // Once an error is latched we only drain; stop copying rows.
-                guard pendingError == nil else { continue }
+                guard pendingFailure == nil else { continue }
 
                 try Task.checkCancellation()
 
@@ -178,7 +207,7 @@ extension PostgresConnection {
                 // over an earlier SELECT — as it did under `PQexec`. What it did is
                 // carried out rather than dropped, so the grid can say so instead of
                 // drawing an empty table.
-                guard pendingError == nil else { continue }
+                guard pendingFailure == nil else { continue }
 
                 let outcome = ExecutionOutcome.command(
                     Self.makeCommandSummary(result),
@@ -205,31 +234,52 @@ extension PostgresConnection {
                 // the message and never mentions them, and finding out would mean
                 // splitting the script, which is exactly what this design does not do. So
                 // a run says where it stopped and never claims "4 of 9".
-                if pendingError == nil {
-                    let message = String(cString: PQerrorMessage(connection))
+                if pendingFailure == nil {
+                    // Classified off the *result*, which is where the SQLSTATE is. The
+                    // connection is consulted only as a fallback, because by the time a
+                    // server-generated error arrives the link is usually still fine — and
+                    // a syntax error that put the session in question would be a
+                    // reconnect on every typo.
+                    let failure = QueryError(
+                        message: String(cString: PQerrorMessage(connection)),
+                        kind: PostgresFailure.of(result: result, connection: connection)
+                    )
 
-                    pendingError = message
+                    pendingFailure = failure
 
                     reporting?(
                         .statement(
-                            StatementOutcome(
-                                index: statementIndex,
-                                disposition: .failed(QueryError(message: message))
-                            )
+                            StatementOutcome(index: statementIndex, disposition: .failed(failure))
                         )
                     )
                 }
             }
         }
 
-        if let pendingError {
+        // The drain ended without an error, which normally means the statement finished.
+        // It also happens when the link died between results: libpq usually manufactures
+        // a `PGRES_FATAL_ERROR` first, but where it cannot — the socket vanished rather
+        // than being closed — `PQgetResult` simply returns nil and the loop above exits
+        // as though everything arrived. Without this the caller is handed however many
+        // rows made it across, labelled as the whole answer, and nothing anywhere says
+        // the result is short.
+        if pendingFailure == nil, PQstatus(connection) == CONNECTION_BAD {
+            builder?.flush()
+
+            throw QueryError(
+                message: String(cString: PQerrorMessage(connection)),
+                kind: .transport
+            )
+        }
+
+        if let pendingFailure {
             // Rows read before the error was latched are still rows the database sent,
             // and the caller keeps whatever has been published when a run breaks. Those
             // in the segment still being filled would otherwise be dropped for no
             // reason but where the chunk boundary happened to fall.
             builder?.flush()
 
-            throw QueryError(message: pendingError)
+            throw pendingFailure
         }
 
         let statistics = ExecutionStatistics(duration: CFAbsoluteTimeGetCurrent() - start)

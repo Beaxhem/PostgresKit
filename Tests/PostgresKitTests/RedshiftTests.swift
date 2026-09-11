@@ -43,7 +43,14 @@ struct RedshiftTests {
 
         let uri = configuration.connectionString
 
-        #expect(uri == "postgres://aws%20user:p%40ss%2Fw%3Ard%3F%23@cluster.example.com:5439/dev?sslmode=require")
+        // The authority and the path, asserted as a prefix rather than as the whole
+        // string: the query part now also carries the timeouts and keepalives, which are
+        // nothing to do with what this is checking. See ``ConnectionResilience``.
+        #expect(
+            uri.hasPrefix(
+                "postgres://aws%20user:p%40ss%2Fw%3Ard%3F%23@cluster.example.com:5439/dev?sslmode=require"
+            )
+        )
 
         // The host must appear exactly once — the failure mode being guarded is a second
         // `@` splitting the authority in the wrong place.
@@ -61,7 +68,7 @@ struct RedshiftTests {
             database: "demo"
         )
 
-        #expect(configuration.connectionString.hasSuffix("?sslmode=prefer"))
+        #expect(configuration.connectionString.contains("?sslmode=prefer"))
     }
 
     // MARK: - Settings

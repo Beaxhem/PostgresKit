@@ -32,6 +32,16 @@ public struct PostgresConfiguration: Sendable {
     public var database: String?
     public var sslMode: PostgresSSLMode
 
+    /// How long to wait for a connection, and whether to keep it proven alive.
+    ///
+    /// Defaulted rather than left to libpq, and the default is the point. libpq's own
+    /// `connect_timeout` is *unset*, which means a handshake against a black-holed route
+    /// — the shape a VPN dropping takes — blocks until the OS gives up on the TCP
+    /// connect, upwards of a minute. That wait happens inside `PQconnectdb`, which is a
+    /// blocking C call: cancelling the Swift task around it does not end it and does not
+    /// give the thread back. The only thing that bounds it is this parameter.
+    public var resilience: ConnectionResilience
+
     /// The libpq connection URI.
     ///
     /// User and password are percent-encoded, which they were not before Redshift
@@ -55,7 +65,23 @@ public struct PostgresConfiguration: Sendable {
         let secret = Self.encode(password)
         let name = Self.encode(database ?? "")
 
-        return "postgres://\(user):\(secret)@\(host):\(port)/\(name)?sslmode=\(sslMode.rawValue)"
+        var parameters = [
+            "sslmode=\(sslMode.rawValue)",
+            "connect_timeout=\(Int(resilience.connectTimeout))"
+        ]
+
+        if let keepalive = resilience.keepalive {
+            parameters += [
+                "keepalives=1",
+                "keepalives_idle=\(Int(keepalive.idle))",
+                "keepalives_interval=\(Int(keepalive.interval))",
+                "keepalives_count=\(keepalive.count)"
+            ]
+        } else {
+            parameters.append("keepalives=0")
+        }
+
+        return "postgres://\(user):\(secret)@\(host):\(port)/\(name)?" + parameters.joined(separator: "&")
     }
 
     public init(
@@ -64,7 +90,8 @@ public struct PostgresConfiguration: Sendable {
         host: String,
         port: UInt16,
         database: String?,
-        sslMode: PostgresSSLMode = .prefer
+        sslMode: PostgresSSLMode = .prefer,
+        resilience: ConnectionResilience = .default
     ) {
         self.username = username
         self.password = password
@@ -72,6 +99,7 @@ public struct PostgresConfiguration: Sendable {
         self.port = port
         self.database = database
         self.sslMode = sslMode
+        self.resilience = resilience
     }
 
     /// Percent-encodes one URI component. `urlUserAllowed` still permits the
@@ -98,10 +126,18 @@ struct PostgresConnectionFactory: ConnectionFactory {
         if PQstatus(connection) != CONNECTION_OK {
             defer { PQfinish(connection) }
 
-            throw .init(message: String(cString: PQerrorMessage(connection)))
+            throw .init(
+                message: String(cString: PQerrorMessage(connection)),
+                kind: PostgresFailure.ofConnect(connection)
+            )
         }
 
         return .init(connection: connection!)
+    }
+
+    /// libpq's own verdict, read locally. See ``PostgresConnection/isAlive``.
+    func isAlive(_ connection: PostgresConnection) -> Bool {
+        connection.isAlive
     }
 
 }
@@ -195,6 +231,15 @@ public extension PostgresSession {
                 throw .cancelled
             }
         }
+    }
+
+    /// Empties the pool. The next statement opens a fresh connection.
+    ///
+    /// `metaInfo` is deliberately kept. It is the server's type catalog — oid to type
+    /// name — which does not change because the socket carrying it did, and refetching it
+    /// would put a `pg_type` scan in front of the first query after every wake.
+    func invalidate() async {
+        await pool.invalidate()
     }
 
     /// Cancellation is `.connection`, not `.token`: Postgres cancels over a side channel
