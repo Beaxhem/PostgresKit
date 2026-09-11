@@ -132,6 +132,13 @@ struct PostgresConnectionFactory: ConnectionFactory {
             )
         }
 
+        // libpq sets `SO_KEEPALIVE` and its three parameters from the connection string,
+        // and offers nothing at all for the retransmission schedule — which is the half
+        // that matters while a query is outstanding. Applied to the descriptor directly
+        // because that is the only place both can be said. See
+        // ``DataEngine/SocketLiveness``.
+        SocketLiveness.apply(configuration.resilience.keepalive, to: PQsocket(connection))
+
         return .init(connection: connection!)
     }
 
