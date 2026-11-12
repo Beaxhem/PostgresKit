@@ -30,6 +30,7 @@ public struct RedshiftEngine: DatabaseEngine {
             id: Self.identifier,
             displayName: "Redshift",
             badge: "RS",
+            iconAssetName: "redshift",
             // Tables and views only, which is what `svv_redshift_tables` can be trusted
             // to classify. No sequences — Redshift has `IDENTITY` columns and no
             // `CREATE SEQUENCE` — and no routines yet: Redshift's `pg_proc` is inherited
