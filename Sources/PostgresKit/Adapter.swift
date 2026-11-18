@@ -12,14 +12,71 @@ import DataEngine
 
 /// What libpq should do about TLS.
 ///
-/// Only the two values that are actually chosen between here. `prefer` is libpq's own
-/// default — encrypt if the server offers it, connect anyway if it does not — and
-/// `require` refuses to connect in the clear, which is what a managed cluster reached
-/// over the internet needs.
-public enum PostgresSSLMode: String, Sendable {
+/// `prefer` is libpq's own default — encrypt if the server offers it, connect anyway if
+/// it does not. `require` refuses to connect in the clear, which is what a managed
+/// service reached over the internet needs (Neon rejects a plaintext startup outright).
+/// `disable` never attempts TLS, for a local server whose handshake is a cost with no
+/// benefit, or one whose TLS is misconfigured.
+///
+/// **None of these meant anything until 2026-11-16.** The libpq vendored before then
+/// was built without OpenSSL, so `prefer` silently connected in the clear and `require`
+/// failed at option parsing ("invalid when SSL support is not compiled in"). It is now
+/// built `--with-openssl`; its libssl/libcrypto references are left undefined and
+/// satisfied by OpenSSL-Package, the same copy MysqlKit and SSHKit link.
+///
+/// The `verify-*` modes are left out on purpose: they need a CA bundle, and a
+/// statically linked OpenSSL in a sandboxed app has no system trust store to find.
+public enum PostgresSSLMode: String, Sendable, CaseIterable {
 
+    case disable
     case prefer
     case require
+
+}
+
+public extension PostgresSSLMode {
+
+    /// What a connection with nothing stored reads as — every Postgres connection saved
+    /// before the picker existed. libpq's own default, so those connections keep
+    /// behaving as they did, except that they now actually encrypt where the server
+    /// offers it.
+    static let fallback: PostgresSSLMode = .prefer
+
+    /// The mode stored in `settings`, or ``fallback``.
+    init(settings: SettingsValues) {
+        self = settings.string(.sslMode).flatMap(Self.init(rawValue:)) ?? Self.fallback
+    }
+
+    var label: String {
+        switch self {
+        case .disable: "Disable"
+        case .prefer: "Prefer"
+        case .require: "Require"
+        }
+    }
+
+    /// The connection editor's picker. Its default is ``fallback`` so the picker cannot
+    /// show one mode while the engine uses another.
+    static var field: SettingField {
+        SettingField(
+            .sslMode,
+            label: "SSL mode",
+            kind: .choice(
+                options: allCases.map { SettingField.Option(value: $0.rawValue, label: $0.label) },
+                default: fallback.rawValue
+            ),
+            help: "Prefer encrypts when the server supports it. Require refuses an unencrypted connection, which managed services such as Neon need."
+        )
+    }
+
+}
+
+public extension SettingKey {
+
+    /// libpq's `sslmode`, spelled as libpq spells its values. Postgres only — Redshift
+    /// keeps its older `useTLS` toggle, since the toggle's two states are exactly the two
+    /// modes Redshift has a use for.
+    static let sslMode: SettingKey = "sslMode"
 
 }
 

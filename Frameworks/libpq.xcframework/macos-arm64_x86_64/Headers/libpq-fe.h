@@ -18,7 +18,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include "postgres_ext.h"
-
 #ifdef __cplusplus
 extern "C"
 {

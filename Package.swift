@@ -12,13 +12,25 @@ let package = Package(
         .library(name: "PostgresKit", targets: ["PostgresKit"])
     ],
     dependencies: [
+        // Same range as MysqlKit and SSHKit: one app, one OpenSSL. See
+        // querynaut-dependencies/versions.env for why it has to stay on 3.x.
+        .package(url: "https://github.com/krzyzanowskim/OpenSSL-Package.git", .upToNextMajor(from: "3.3.2000")),
         .package(name: "DataEngine", path: "../DataEngine")
     ],
     targets: [
+        // Built by querynaut-dependencies/build.sh — `PG_WITH_OPENSSL=1 ./build.sh postgres`.
+        //
+        // libpq is built --with-openssl, and its libssl/libcrypto references stay
+        // *undefined* in the static archive: OpenSSL-Package below satisfies them, so the
+        // binary carries one OpenSSL shared by libpq, libmysqlclient and libssh2 rather
+        // than a second copy baked into this one.
         .binaryTarget(name: "libpq", path: "./Frameworks/libpq.xcframework"),
         .target(
             name: "CPostgres",
-            dependencies: ["libpq"],
+            dependencies: [
+                "libpq",
+                .product(name: "OpenSSL", package: "OpenSSL-Package")
+            ],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
             ]

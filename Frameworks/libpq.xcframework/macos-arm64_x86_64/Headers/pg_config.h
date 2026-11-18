@@ -32,7 +32,7 @@
 #define BLCKSZ 8192
 
 /* Saved arguments from configure */
-#define CONFIGURE_ARGS " '--prefix=/Users/illiasenchukov/Desktop/projects/Querynaut/querynaut-dependencies/postgresql-18.4/install-arm64' '--with-icu' 'ICU_CFLAGS=-I/opt/homebrew/opt/icu4c/include' 'ICU_LIBS=-L/opt/homebrew/opt/icu4c/lib -licui18n -licuuc -licudata' 'CFLAGS=-arch arm64 -mmacosx-version-min=14.6' 'LDFLAGS=-arch arm64' 'CXXFLAGS=-arch arm64 -std=c++20'"
+#define CONFIGURE_ARGS " '--prefix=/Users/illiasenchukov/Desktop/projects/Querynaut/querynaut-dependencies/postgresql-18.4/install-arm64' '--with-icu' 'ICU_CFLAGS=-I/opt/homebrew/opt/icu4c/include' 'ICU_LIBS=-L/opt/homebrew/opt/icu4c/lib -licui18n -licuuc -licudata' 'CFLAGS=-arch arm64 -mmacosx-version-min=15.0' 'LDFLAGS=-arch arm64' 'CXXFLAGS=-arch arm64 -std=c++20' '--with-openssl' '--with-includes=/opt/homebrew/opt/openssl@3/include' '--with-libraries=/opt/homebrew/opt/openssl@3/lib' 'CPPFLAGS=-DOPENSSL_NO_ENGINE'"
 
 /* Define to the default TCP port number on which the server listens and to
    which clients will try to connect. This can be overridden at run-time, but
@@ -243,7 +243,7 @@
 /* #undef HAVE_LDAP_INITIALIZE */
 
 /* Define to 1 if you have the `crypto' library (-lcrypto). */
-/* #undef HAVE_LIBCRYPTO */
+#define HAVE_LIBCRYPTO 1
 
 /* Define to 1 if you have the `curl' library (-lcurl). */
 /* #undef HAVE_LIBCURL */
@@ -270,7 +270,7 @@
 /* #undef HAVE_LIBSELINUX */
 
 /* Define to 1 if you have the `ssl' library (-lssl). */
-/* #undef HAVE_LIBSSL */
+#define HAVE_LIBSSL 1
 
 /* Define to 1 if you have the `wldap32' library (-lwldap32). */
 /* #undef HAVE_LIBWLDAP32 */
@@ -375,16 +375,16 @@
 #define HAVE_SOCKLEN_T 1
 
 /* Define to 1 if you have the `SSL_CTX_set_cert_cb' function. */
-/* #undef HAVE_SSL_CTX_SET_CERT_CB */
+#define HAVE_SSL_CTX_SET_CERT_CB 1
 
 /* Define to 1 if you have the `SSL_CTX_set_ciphersuites' function. */
-/* #undef HAVE_SSL_CTX_SET_CIPHERSUITES */
+#define HAVE_SSL_CTX_SET_CIPHERSUITES 1
 
 /* Define to 1 if you have the `SSL_CTX_set_keylog_callback' function. */
-/* #undef HAVE_SSL_CTX_SET_KEYLOG_CALLBACK */
+#define HAVE_SSL_CTX_SET_KEYLOG_CALLBACK 1
 
 /* Define to 1 if you have the `SSL_CTX_set_num_tickets' function. */
-/* #undef HAVE_SSL_CTX_SET_NUM_TICKETS */
+#define HAVE_SSL_CTX_SET_NUM_TICKETS 1
 
 /* Define to 1 if you have the <stdint.h> header file. */
 #define HAVE_STDINT_H 1
@@ -507,7 +507,7 @@
 #define HAVE_WCSTOMBS_L 1
 
 /* Define to 1 if you have the `X509_get_signature_info' function. */
-/* #undef HAVE_X509_GET_SIGNATURE_INFO */
+#define HAVE_X509_GET_SIGNATURE_INFO 1
 
 /* Define to 1 if the assembler supports X86_64's POPCNTQ instruction. */
 /* #undef HAVE_X86_64_POPCNTQ */
@@ -574,7 +574,7 @@
 
 /* Define to the OpenSSL API version in use. This avoids deprecation warnings
    from newer OpenSSL versions. */
-/* #undef OPENSSL_API_COMPAT */
+#define OPENSSL_API_COMPAT 0x10101000L
 
 /* Define to the address where bug reports for this package should be sent. */
 #define PACKAGE_BUGREPORT "pgsql-bugs@lists.postgresql.org"
@@ -625,7 +625,7 @@
 #define PG_VERSION_NUM 180004
 
 /* A string containing the version number, platform, and C compiler */
-#define PG_VERSION_STR "PostgreSQL 18.4 on aarch64-apple-darwin25.5.0, compiled by Apple clang version 21.0.0 (clang-2100.1.1.101), 64-bit"
+#define PG_VERSION_STR "PostgreSQL 18.4 on aarch64-apple-darwin27.2.0, compiled by Apple clang version 21.0.0 (clang-2100.4.1.1), 64-bit"
 
 /* Define to 1 to allow profiling output to be saved separately for each
    process. */
@@ -728,7 +728,7 @@
 /* #undef USE_NAMED_POSIX_SEMAPHORES */
 
 /* Define to 1 to build with OpenSSL support. (--with-ssl=openssl) */
-/* #undef USE_OPENSSL */
+#define USE_OPENSSL 1
 
 /* Define to 1 to build with PAM support. (--with-pam) */
 /* #undef USE_PAM */
