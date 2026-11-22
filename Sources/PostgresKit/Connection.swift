@@ -62,13 +62,13 @@ extension PostgresConnection {
     ) async throws -> ExecutionOutcome {
         let start = CFAbsoluteTimeGetCurrent()
 
-        // Stream the result set one row at a time instead of letting libpq
+        // Stream the result set a chunk of rows at a time instead of letting libpq
         // buffer the entire thing in its own memory before we copy it out.
-        // `PQsendQuery` dispatches asynchronously and `PQsetSingleRowMode` makes
-        // each `PQgetResult` return a `PGresult` holding a single row, which we
-        // copy into the arena and free immediately. Peak memory is therefore the
-        // arena plus one driver-owned row, not the arena plus a full second copy
-        // of the whole result set.
+        // `PQsendQuery` dispatches asynchronously and `PQsetChunkedRowsMode` makes
+        // each `PQgetResult` return a `PGresult` holding up to `rowsPerChunk` rows,
+        // which we copy into the arena and free immediately. Peak memory is therefore
+        // the arena plus one chunk, not the arena plus a full second copy of the whole
+        // result set.
 
         guard PQsendQuery(connection, query) == 1 else {
             // No `PGresult` exists yet, so the connection's own status is the only
@@ -81,10 +81,19 @@ extension PostgresConnection {
             )
         }
 
-        // Best effort: if this fails, libpq falls back to buffering the whole set
-        // into a single `PGRES_TUPLES_OK`, which the drain loop below still reads
-        // correctly — we just lose the memory win for this query.
-        _ = PQsetSingleRowMode(connection)
+        // Chunks rather than single rows (libpq 17+). Single-row mode builds and frees a
+        // whole `PGresult` per row — column descriptions copied into every one — and
+        // that was the bulk of reading a large result: measured against a local server,
+        // 2M rows took 975 → 600 ms at 6 columns and 2,350 → ~1,550 ms at 18, first rows
+        // still under a millisecond either way. 256 and 1,000 rows per chunk measured the
+        // same; 10,000 only delayed the first rows.
+        //
+        // Best effort, both of them: if neither takes, libpq falls back to buffering the
+        // whole set into a single `PGRES_TUPLES_OK`, which the drain loop below still
+        // reads correctly — we just lose the memory win for this query.
+        if PQsetChunkedRowsMode(connection, Self.rowsPerChunk) == 0 {
+            _ = PQsetSingleRowMode(connection)
+        }
 
         // Each statement's rows go into their own arena: column counts differ between
         // statements, and a shared arena would both merge unrelated rows and trip the
@@ -127,7 +136,7 @@ extension PostgresConnection {
             let status = PQresultStatus(result)
 
             switch status {
-            case PGRES_SINGLE_TUPLE, PGRES_TUPLES_OK:
+            case PGRES_TUPLES_CHUNK, PGRES_SINGLE_TUPLE, PGRES_TUPLES_OK:
                 if columns == nil {
                     columns = Self.makeColumns(result, metaInfo: metaInfo)
                 }
@@ -160,9 +169,11 @@ extension PostgresConnection {
                     builder = statementBuilder
                 }
 
-                // `PGRES_SINGLE_TUPLE` carries one row; a `PGRES_TUPLES_OK` carries
-                // the whole set when single-row mode wasn't in effect, and zero rows
-                // when it was (it just marks the end of this statement).
+                // `PGRES_TUPLES_CHUNK` carries up to `rowsPerChunk` rows (and
+                // `PGRES_SINGLE_TUPLE` one, should chunked mode have been refused); a
+                // `PGRES_TUPLES_OK` carries the whole set when neither mode was in
+                // effect, and zero rows when one was (it just marks the end of this
+                // statement).
                 let columnsCount = PQnfields(result)
                 for tuple in 0..<PQntuples(result) {
                     for columnIdx in 0..<columnsCount {
@@ -332,6 +343,11 @@ extension PostgresConnection {
     /// `PQcmdTuples` is the row count on its own, and is an empty string for statements
     /// that touch no rows — which is why it is parsed rather than defaulted, so DDL
     /// reports nothing instead of reporting zero.
+    /// Rows per `PGresult` while a result streams. Small enough that the first rows are
+    /// in hand at once — 10,000 measured ~3 ms to the first rows against ~0.4 ms here —
+    /// and large enough that building a result is no longer a per-row cost.
+    static let rowsPerChunk: Int32 = 1000
+
     private static func makeCommandSummary(_ result: OpaquePointer?) -> CommandSummary {
         var status = ""
         if let cStatus = PQcmdStatus(result) {
