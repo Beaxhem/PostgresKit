@@ -146,9 +146,12 @@ extension PostgresConnection {
 
                 try Task.checkCancellation()
 
-                let statementBuilder: StreamingResultBuilder
-                if let builder {
-                    statementBuilder = builder
+                // Taken out for this chunk and either consumed into the statement's
+                // store below or put back for the next chunk: the builder has one
+                // owner, so it is never in both places at once.
+                var statementBuilder: StreamingResultBuilder
+                if let existing = builder.take() {
+                    statementBuilder = existing
                 } else {
                     let statementColumns = columns ?? []
                     let index = statementIndex
@@ -165,8 +168,6 @@ extension PostgresConnection {
                             }
                         }
                     )
-
-                    builder = statementBuilder
                 }
 
                 // `PGRES_TUPLES_CHUNK` carries up to `rowsPerChunk` rows (and
@@ -202,7 +203,6 @@ extension PostgresConnection {
                     )
 
                     latest = outcome
-                    builder = nil
                     columns = nil
 
                     reporting?(
@@ -211,6 +211,8 @@ extension PostgresConnection {
 
                     statementIndex += 1
                     statementStart = CFAbsoluteTimeGetCurrent()
+                } else {
+                    builder = consume statementBuilder
                 }
             case PGRES_COMMAND_OK, PGRES_EMPTY_QUERY:
                 // A statement with no result set (INSERT/UPDATE/DDL, or empty). It
